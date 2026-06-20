@@ -154,7 +154,7 @@ fun LoginScreen(
                     color = Color.White,
                     letterSpacing = (-0.5).sp,
                     shadow = Shadow(
-                        color = Color(0xFF00CFFF).copy(alpha = 0.5f),
+                        color = Color(0xFFBBC6E2).copy(alpha = 0.5f),
                         blurRadius = 15f
                     )
                 )
@@ -203,7 +203,7 @@ fun LoginScreen(
                         text = "Forgot Password?",
                         fontSize = 12.sp,
                         fontWeight = FontWeight.SemiBold,
-                        color = Color(0xFF00CFFF),
+                        color = Color(0xFFBBC6E2),
                         modifier = Modifier.clickable { showForgotPasswordDialog = true }
                     )
                 }
@@ -339,7 +339,7 @@ fun LoginScreen(
                     shape = RoundedCornerShape(12.dp),
                     border = BorderStroke(1.dp, Color.White.copy(alpha = 0.1f)),
                     colors = ButtonDefaults.outlinedButtonColors(
-                        containerColor = Color(0xFF313843).copy(alpha = 0.18f)
+                        containerColor = Color(0xFF31353C).copy(alpha = 0.18f)
                     )
                 ) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
@@ -370,7 +370,7 @@ fun LoginScreen(
                 )
                 Text(
                     text = "Create a new account",
-                    color = Color(0xFF00CFFF),
+                    color = Color(0xFFBBC6E2),
                     fontWeight = FontWeight.Bold,
                     fontSize = 14.sp,
                     modifier = Modifier.clickable { onCreateAccountClick() }
@@ -440,9 +440,9 @@ fun ForgotPasswordDialog(onDismiss: () -> Unit) {
                             colors = OutlinedTextFieldDefaults.colors(
                                 focusedTextColor = Color.White,
                                 unfocusedTextColor = Color.White,
-                                focusedBorderColor = Color(0xFF00CFFF),
+                                focusedBorderColor = Color(0xFFBBC6E2),
                                 unfocusedBorderColor = Color.White.copy(alpha = 0.2f),
-                                focusedLabelColor = Color(0xFF00CFFF),
+                                focusedLabelColor = Color(0xFFBBC6E2),
                                 unfocusedLabelColor = Color.White.copy(alpha = 0.4f)
                             ),
                             shape = RoundedCornerShape(12.dp)
@@ -464,9 +464,9 @@ fun ForgotPasswordDialog(onDismiss: () -> Unit) {
                             colors = OutlinedTextFieldDefaults.colors(
                                 focusedTextColor = Color.White,
                                 unfocusedTextColor = Color.White,
-                                focusedBorderColor = Color(0xFF00CFFF),
+                                focusedBorderColor = Color(0xFFBBC6E2),
                                 unfocusedBorderColor = Color.White.copy(alpha = 0.2f),
-                                focusedLabelColor = Color(0xFF00CFFF),
+                                focusedLabelColor = Color(0xFFBBC6E2),
                                 unfocusedLabelColor = Color.White.copy(alpha = 0.4f)
                             ),
                             shape = RoundedCornerShape(12.dp)
@@ -494,9 +494,9 @@ fun ForgotPasswordDialog(onDismiss: () -> Unit) {
                             colors = OutlinedTextFieldDefaults.colors(
                                 focusedTextColor = Color.White,
                                 unfocusedTextColor = Color.White,
-                                focusedBorderColor = Color(0xFF00CFFF),
+                                focusedBorderColor = Color(0xFFBBC6E2),
                                 unfocusedBorderColor = Color.White.copy(alpha = 0.2f),
-                                focusedLabelColor = Color(0xFF00CFFF),
+                                focusedLabelColor = Color(0xFFBBC6E2),
                                 unfocusedLabelColor = Color.White.copy(alpha = 0.4f)
                             ),
                             shape = RoundedCornerShape(12.dp)
@@ -633,7 +633,7 @@ fun ForgotPasswordDialog(onDismiss: () -> Unit) {
                     }
                 },
                 enabled = !isLoading,
-                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF00CFFF))
+                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFBBC6E2))
             ) {
                 if (isLoading) {
                     CircularProgressIndicator(modifier = Modifier.size(20.dp), color = Color.Black, strokeWidth = 2.dp)

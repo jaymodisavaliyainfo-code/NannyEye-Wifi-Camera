@@ -6,12 +6,12 @@ import android.content.Intent
 import android.graphics.Bitmap
 import android.net.Uri
 import android.provider.Settings
-import android.widget.FrameLayout
 import android.widget.Toast
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.keyframes
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
@@ -41,13 +41,12 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.ArrowForward
-import androidx.compose.material.icons.filled.Adjust
+import androidx.compose.material.icons.automirrored.outlined.HelpOutline
 import androidx.compose.material.icons.filled.ArrowDropDown
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Link
 import androidx.compose.material.icons.filled.NetworkCheck
 import androidx.compose.material.icons.filled.Search
-import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Shield
 import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material.icons.filled.VisibilityOff
@@ -62,11 +61,6 @@ import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
-import androidx.compose.animation.core.keyframes
-import androidx.compose.material.icons.automirrored.outlined.HelpOutline
-import androidx.compose.ui.graphics.graphicsLayer
-import androidx.compose.ui.res.dimensionResource
-import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
@@ -97,9 +91,12 @@ import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.colorResource
+import androidx.compose.ui.res.dimensionResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.res.vectorResource
 import androidx.compose.ui.text.font.FontWeight
@@ -107,7 +104,6 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.text.style.TextAlign
-import androidx.compose.ui.viewinterop.AndroidView
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import androidx.core.app.ActivityCompat
@@ -156,12 +152,14 @@ fun AddDeviceScreen(
             val cameraGranted = results[Manifest.permission.CAMERA] ?: false
             val audioGranted = results[Manifest.permission.RECORD_AUDIO] ?: false
 
-            val cameraPermanentlyDenied = !cameraGranted && !ActivityCompat.shouldShowRequestPermissionRationale(
-                activity, Manifest.permission.CAMERA
-            )
-            val audioPermanentlyDenied = !audioGranted && !ActivityCompat.shouldShowRequestPermissionRationale(
-                activity, Manifest.permission.RECORD_AUDIO
-            )
+            val cameraPermanentlyDenied =
+                !cameraGranted && !ActivityCompat.shouldShowRequestPermissionRationale(
+                    activity, Manifest.permission.CAMERA
+                )
+            val audioPermanentlyDenied =
+                !audioGranted && !ActivityCompat.shouldShowRequestPermissionRationale(
+                    activity, Manifest.permission.RECORD_AUDIO
+                )
 
             if (cameraPermanentlyDenied || audioPermanentlyDenied) {
                 showPermissionDialog = true
@@ -287,7 +285,7 @@ fun AddDeviceScreen(
 
             Spacer(modifier = Modifier.weight(1f))
 
-            if (AdsDataHolder.adsData != null) {
+            /*if (AdsDataHolder.adsData != null) {
                 AndroidView(
                     modifier = Modifier
                         .fillMaxWidth(), factory = {
@@ -299,7 +297,7 @@ fun AddDeviceScreen(
                     })
             }
 
-            Spacer(modifier = Modifier.height(dimensionResource(id = R.dimen.section_spacing)))
+            Spacer(modifier = Modifier.height(dimensionResource(id = R.dimen.section_spacing)))*/
 
             Box(
                 modifier = Modifier
@@ -354,13 +352,15 @@ fun AddDeviceScreen(
             }
 
             if (showPermissionDialog) {
-                CustomPermissionDialog(onDismiss = { showPermissionDialog = false }, onOpenSettings = {
-                    showPermissionDialog = false
-                    val intent = Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
-                        data = Uri.fromParts("package", context.packageName, null)
-                    }
-                    context.startActivity(intent)
-                })
+                CustomPermissionDialog(
+                    onDismiss = { showPermissionDialog = false },
+                    onOpenSettings = {
+                        showPermissionDialog = false
+                        val intent = Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
+                            data = Uri.fromParts("package", context.packageName, null)
+                        }
+                        context.startActivity(intent)
+                    })
             }
 
             Spacer(modifier = Modifier.height(dimensionResource(id = R.dimen.section_spacing)))
@@ -386,7 +386,9 @@ fun DeviceOptionItem(
             .fillMaxWidth()
             .clickable { onClick() }
             .border(
-                width = if (isSelected) dimensionResource(id = R.dimen.spacer_nano) else dimensionResource(id = R.dimen.spacer_none),
+                width = if (isSelected) dimensionResource(id = R.dimen.spacer_nano) else dimensionResource(
+                    id = R.dimen.spacer_none
+                ),
                 color = if (isSelected) colorResource(id = R.color.selected_stroke) else Color.Transparent,
                 shape = RoundedCornerShape(dimensionResource(id = R.dimen.radius_medium))
             ),
@@ -490,8 +492,10 @@ fun QRCodeDialog(
         Surface(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(top = dimensionResource(id = R.dimen.padding_medium),
-                    bottom = dimensionResource(id = R.dimen.padding_medium)), // To show some of the background like in the image
+                .padding(
+                    top = dimensionResource(id = R.dimen.padding_medium),
+                    bottom = dimensionResource(id = R.dimen.padding_medium)
+                ), // To show some of the background like in the image
             color = darkBackground,
             shape = RoundedCornerShape(dimensionResource(id = R.dimen.radius_large))
         ) {
@@ -514,285 +518,291 @@ fun QRCodeDialog(
                         .padding(dimensionResource(id = R.dimen.screen_padding)),
                     horizontalAlignment = Alignment.CenterHorizontally
                 ) {
-                Spacer(modifier = Modifier.height(dimensionResource(id = R.dimen.section_spacing)))
+                    Spacer(modifier = Modifier.height(dimensionResource(id = R.dimen.section_spacing)))
 
-                Text(
-                    text = stringResource(id = R.string.scan_qr_instruction),
-                    color = Color.White,
-                    fontSize = with(density) { dimensionResource(id = R.dimen.text_h2).toSp() },
-                    fontWeight = FontWeight.Medium,
-                    textAlign = TextAlign.Center,
-                    lineHeight = with(density) { dimensionResource(id = R.dimen.text_h1).toSp() }
-                )
-
-                Spacer(modifier = Modifier.height(dimensionResource(id = R.dimen.spacer_medium)))
-
-                Text(
-                    text = stringResource(id = R.string.scan_qr_description),
-                    color = textGrey,
-                    fontSize = with(density) { dimensionResource(id = R.dimen.text_small).toSp() },
-                    textAlign = TextAlign.Center,
-                    lineHeight = with(density) { dimensionResource(id = R.dimen.text_body).toSp() },
-                    modifier = Modifier.padding(horizontal = dimensionResource(id = R.dimen.screen_padding))
-                )
-
-                Spacer(modifier = Modifier.height(dimensionResource(id = R.dimen.section_spacing)))
-
-                // QR Code Container with Focus Corners
-                Box(
-                    modifier = Modifier.size(dimensionResource(id = R.dimen.qr_container_size)),
-                    contentAlignment = Alignment.Center
-                ) {
-                    // Scanning Line Animation
-                    val infiniteTransition = rememberInfiniteTransition(label = "lineAnimation")
-                    val lineY by infiniteTransition.animateFloat(
-                        initialValue = 0f,
-                        targetValue = 1f,
-                        animationSpec = infiniteRepeatable(
-                            animation = tween(2000, easing = LinearEasing),
-                            repeatMode = RepeatMode.Reverse
-                        ),
-                        label = "lineY"
+                    Text(
+                        text = stringResource(id = R.string.scan_qr_instruction),
+                        color = Color.White,
+                        fontSize = with(density) { dimensionResource(id = R.dimen.text_h2).toSp() },
+                        fontWeight = FontWeight.Medium,
+                        textAlign = TextAlign.Center,
+                        lineHeight = with(density) { dimensionResource(id = R.dimen.text_h1).toSp() }
                     )
 
-                    // Custom Focus Corners
-                    val strokeWidth = dimensionResource(id = R.dimen.spacer_nano)
-                    val cornerSize = dimensionResource(id = R.dimen.icon_size_medium)
-                    val radius = dimensionResource(id = R.dimen.element_spacing)
-                    val padding = dimensionResource(id = R.dimen.spacer_small)
+                    Spacer(modifier = Modifier.height(dimensionResource(id = R.dimen.spacer_medium)))
 
-                    Canvas(modifier = Modifier.fillMaxSize()) {
-                        val strokeWidthPx = strokeWidth.toPx()
-                        val cornerSizePx = cornerSize.toPx()
-                        val radiusPx = radius.toPx()
-                        val paddingPx = padding.toPx()
+                    Text(
+                        text = stringResource(id = R.string.scan_qr_description),
+                        color = textGrey,
+                        fontSize = with(density) { dimensionResource(id = R.dimen.text_small).toSp() },
+                        textAlign = TextAlign.Center,
+                        lineHeight = with(density) { dimensionResource(id = R.dimen.text_body).toSp() },
+                        modifier = Modifier.padding(horizontal = dimensionResource(id = R.dimen.screen_padding))
+                    )
 
-                        // Top Left
-                        val pathTL = androidx.compose.ui.graphics.Path().apply {
-                            moveTo(paddingPx, cornerSizePx + paddingPx)
-                            lineTo(paddingPx, radiusPx + paddingPx)
-                            quadraticTo(paddingPx, paddingPx, radiusPx + paddingPx, paddingPx)
-                            lineTo(cornerSizePx + paddingPx, paddingPx)
-                        }
-                        drawPath(
-                            pathTL,
-                            Color.White,
-                            style = androidx.compose.ui.graphics.drawscope.Stroke(strokeWidthPx)
+                    Spacer(modifier = Modifier.height(dimensionResource(id = R.dimen.section_spacing)))
+
+                    // QR Code Container with Focus Corners
+                    Box(
+                        modifier = Modifier.size(dimensionResource(id = R.dimen.qr_container_size)),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        // Scanning Line Animation
+                        val infiniteTransition = rememberInfiniteTransition(label = "lineAnimation")
+                        val lineY by infiniteTransition.animateFloat(
+                            initialValue = 0f,
+                            targetValue = 1f,
+                            animationSpec = infiniteRepeatable(
+                                animation = tween(2000, easing = LinearEasing),
+                                repeatMode = RepeatMode.Reverse
+                            ),
+                            label = "lineY"
                         )
 
-                        // Top Right
-                        val pathTR = androidx.compose.ui.graphics.Path().apply {
-                            moveTo(size.width - cornerSizePx - paddingPx, paddingPx)
-                            lineTo(size.width - radiusPx - paddingPx, paddingPx)
-                            quadraticTo(
-                                size.width - paddingPx,
-                                paddingPx,
-                                size.width - paddingPx,
-                                radiusPx + paddingPx
+                        // Custom Focus Corners
+                        val strokeWidth = dimensionResource(id = R.dimen.spacer_nano)
+                        val cornerSize = dimensionResource(id = R.dimen.icon_size_medium)
+                        val radius = dimensionResource(id = R.dimen.element_spacing)
+                        val padding = dimensionResource(id = R.dimen.spacer_small)
+
+                        Canvas(modifier = Modifier.fillMaxSize()) {
+                            val strokeWidthPx = strokeWidth.toPx()
+                            val cornerSizePx = cornerSize.toPx()
+                            val radiusPx = radius.toPx()
+                            val paddingPx = padding.toPx()
+
+                            // Top Left
+                            val pathTL = androidx.compose.ui.graphics.Path().apply {
+                                moveTo(paddingPx, cornerSizePx + paddingPx)
+                                lineTo(paddingPx, radiusPx + paddingPx)
+                                quadraticTo(paddingPx, paddingPx, radiusPx + paddingPx, paddingPx)
+                                lineTo(cornerSizePx + paddingPx, paddingPx)
+                            }
+                            drawPath(
+                                pathTL,
+                                Color.White,
+                                style = androidx.compose.ui.graphics.drawscope.Stroke(strokeWidthPx)
                             )
-                            lineTo(size.width - paddingPx, cornerSizePx + paddingPx)
+
+                            // Top Right
+                            val pathTR = androidx.compose.ui.graphics.Path().apply {
+                                moveTo(size.width - cornerSizePx - paddingPx, paddingPx)
+                                lineTo(size.width - radiusPx - paddingPx, paddingPx)
+                                quadraticTo(
+                                    size.width - paddingPx,
+                                    paddingPx,
+                                    size.width - paddingPx,
+                                    radiusPx + paddingPx
+                                )
+                                lineTo(size.width - paddingPx, cornerSizePx + paddingPx)
+                            }
+                            drawPath(
+                                pathTR,
+                                Color.White,
+                                style = androidx.compose.ui.graphics.drawscope.Stroke(strokeWidthPx)
+                            )
+
+                            // Bottom Left
+                            val pathBL = androidx.compose.ui.graphics.Path().apply {
+                                moveTo(paddingPx, size.height - cornerSizePx - paddingPx)
+                                lineTo(paddingPx, size.height - radiusPx - paddingPx)
+                                quadraticTo(
+                                    paddingPx,
+                                    size.height - paddingPx,
+                                    radiusPx + paddingPx,
+                                    size.height - paddingPx
+                                )
+                                lineTo(cornerSizePx + paddingPx, size.height - paddingPx)
+                            }
+                            drawPath(
+                                pathBL,
+                                Color.White,
+                                style = androidx.compose.ui.graphics.drawscope.Stroke(strokeWidthPx)
+                            )
+
+                            // Bottom Right
+                            val pathBR = androidx.compose.ui.graphics.Path().apply {
+                                moveTo(
+                                    size.width - cornerSizePx - paddingPx,
+                                    size.height - paddingPx
+                                )
+                                lineTo(size.width - radiusPx - paddingPx, size.height - paddingPx)
+                                quadraticTo(
+                                    size.width - paddingPx,
+                                    size.height - paddingPx,
+                                    size.width - paddingPx,
+                                    size.height - radiusPx - paddingPx
+                                )
+                                lineTo(
+                                    size.width - paddingPx,
+                                    size.height - cornerSizePx - paddingPx
+                                )
+                            }
+                            drawPath(
+                                pathBR,
+                                Color.White,
+                                style = androidx.compose.ui.graphics.drawscope.Stroke(strokeWidthPx)
+                            )
                         }
-                        drawPath(
-                            pathTR,
-                            Color.White,
-                            style = androidx.compose.ui.graphics.drawscope.Stroke(strokeWidthPx)
+
+                        // Scanning Line
+                        val qrCodeSize = dimensionResource(id = R.dimen.qr_code_size)
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth(0.8f)
+                                .height(dimensionResource(id = R.dimen.spacer_nano))
+                                .offset(y = (-(qrCodeSize / 2) + (qrCodeSize * lineY)))
+                                .background(
+                                    Brush.horizontalGradient(
+                                        colors = listOf(
+                                            Color.Transparent,
+                                            Color(0xFFBBC6E2),
+                                            Color.Transparent
+                                        )
+                                    )
+                                )
                         )
 
-                        // Bottom Left
-                        val pathBL = androidx.compose.ui.graphics.Path().apply {
-                            moveTo(paddingPx, size.height - cornerSizePx - paddingPx)
-                            lineTo(paddingPx, size.height - radiusPx - paddingPx)
-                            quadraticTo(
-                                paddingPx,
-                                size.height - paddingPx,
-                                radiusPx + paddingPx,
-                                size.height - paddingPx
-                            )
-                            lineTo(cornerSizePx + paddingPx, size.height - paddingPx)
+                        Surface(
+                            modifier = Modifier.size(dimensionResource(id = R.dimen.qr_code_size)),
+                            color = Color.White,
+                            shape = RoundedCornerShape(dimensionResource(id = R.dimen.radius_large))
+                        ) {
+                            Surface(
+                                modifier = Modifier.size(dimensionResource(id = R.dimen.qr_inner_size)),
+                                color = Color.White,
+                                shape = RoundedCornerShape(dimensionResource(id = R.dimen.radius_small))
+                            ) {
+                                if (qrBitmap != null) {
+                                    Image(
+                                        bitmap = qrBitmap.asImageBitmap(),
+                                        contentDescription = "QR Code",
+                                        modifier = Modifier.padding(dimensionResource(id = R.dimen.spacer_micro))
+                                    )
+                                }
+                            }
                         }
-                        drawPath(
-                            pathBL,
-                            Color.White,
-                            style = androidx.compose.ui.graphics.drawscope.Stroke(strokeWidthPx)
-                        )
+                    }
+                    Spacer(modifier = Modifier.height(dimensionResource(id = R.dimen.section_spacing)))
 
-                        // Bottom Right
-                        val pathBR = androidx.compose.ui.graphics.Path().apply {
-                            moveTo(size.width - cornerSizePx - paddingPx, size.height - paddingPx)
-                            lineTo(size.width - radiusPx - paddingPx, size.height - paddingPx)
-                            quadraticTo(
-                                size.width - paddingPx,
-                                size.height - paddingPx,
-                                size.width - paddingPx,
-                                size.height - radiusPx - paddingPx
-                            )
-                            lineTo(size.width - paddingPx, size.height - cornerSizePx - paddingPx)
-                        }
-                        drawPath(
-                            pathBR,
-                            Color.White,
-                            style = androidx.compose.ui.graphics.drawscope.Stroke(strokeWidthPx)
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = dimensionResource(id = R.dimen.screen_padding)),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        HorizontalDivider(
+                            modifier = Modifier.weight(1f),
+                            color = Color.White.copy(alpha = 0.1f)
+                        )
+                        Text(
+                            text = stringResource(id = R.string.or_separator),
+                            color = textGrey,
+                            fontSize = with(density) { dimensionResource(id = R.dimen.text_caption).toSp() },
+                            modifier = Modifier.padding(horizontal = dimensionResource(id = R.dimen.card_padding))
+                        )
+                        HorizontalDivider(
+                            modifier = Modifier.weight(1f),
+                            color = Color.White.copy(alpha = 0.1f)
                         )
                     }
 
-                    // Scanning Line
-                    val qrCodeSize = dimensionResource(id = R.dimen.qr_code_size)
-                    Box(
-                        modifier = Modifier
-                            .fillMaxWidth(0.8f)
-                            .height(dimensionResource(id = R.dimen.spacer_nano))
-                            .offset(y = (- (qrCodeSize / 2) + (qrCodeSize * lineY)))
-                            .background(
-                                Brush.horizontalGradient(
-                                    colors = listOf(
-                                        Color.Transparent,
-                                        Color(0xFFBBC6E2),
-                                        Color.Transparent
-                                    )
-                                )
-                            )
-                    )
+                    Spacer(modifier = Modifier.height(dimensionResource(id = R.dimen.section_spacing)))
 
-                    Surface(
-                        modifier = Modifier.size(dimensionResource(id = R.dimen.qr_code_size)),
-                        color = Color.White,
-                        shape = RoundedCornerShape(dimensionResource(id = R.dimen.radius_large))
+                    // Send the link Button
+                    Button(
+                        onClick = { /* Handle send link */ },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(dimensionResource(id = R.dimen.button_height_large))
+                            .padding(horizontal = dimensionResource(id = R.dimen.spacer_small)),
+                        shape = RoundedCornerShape(dimensionResource(id = R.dimen.radius_medium)),
+                        colors = ButtonDefaults.buttonColors(containerColor = Color.Transparent),
+                        contentPadding = PaddingValues()
                     ) {
-                        Surface(
-                            modifier = Modifier.size(dimensionResource(id = R.dimen.qr_inner_size)),
-                            color = Color.White,
-                            shape = RoundedCornerShape(dimensionResource(id = R.dimen.radius_small))
+                        Box(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .background(primaryGradient),
+                            contentAlignment = Alignment.Center
                         ) {
-                            if (qrBitmap != null) {
-                                Image(
-                                    bitmap = qrBitmap.asImageBitmap(),
-                                    contentDescription = "QR Code",
-                                    modifier = Modifier.padding(dimensionResource(id = R.dimen.spacer_micro))
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Text(
+                                    stringResource(id = R.string.send_link),
+                                    color = Color(0xFF1B263B),
+                                    fontWeight = FontWeight.Medium,
+                                    fontSize = with(density) { dimensionResource(id = R.dimen.text_subtitle).toSp() }
+                                )
+                                Spacer(modifier = Modifier.width(dimensionResource(id = R.dimen.spacer_small)))
+                                Icon(
+                                    Icons.AutoMirrored.Filled.ArrowForward,
+                                    contentDescription = null,
+                                    tint = Color(0xFF1B263B)
                                 )
                             }
                         }
                     }
-                }
-                Spacer(modifier = Modifier.height(dimensionResource(id = R.dimen.section_spacing)))
 
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = dimensionResource(id = R.dimen.screen_padding)),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    HorizontalDivider(
-                        modifier = Modifier.weight(1f),
-                        color = Color.White.copy(alpha = 0.1f)
-                    )
-                    Text(
-                        text = stringResource(id = R.string.or_separator),
-                        color = textGrey,
-                        fontSize = with(density) { dimensionResource(id = R.dimen.text_caption).toSp() },
-                        modifier = Modifier.padding(horizontal = dimensionResource(id = R.dimen.card_padding))
-                    )
-                    HorizontalDivider(
-                        modifier = Modifier.weight(1f),
-                        color = Color.White.copy(alpha = 0.1f)
-                    )
-                }
+                    Spacer(modifier = Modifier.height(dimensionResource(id = R.dimen.element_spacing)))
 
-                Spacer(modifier = Modifier.height(dimensionResource(id = R.dimen.section_spacing)))
-
-                // Send the link Button
-                Button(
-                    onClick = { /* Handle send link */ },
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(dimensionResource(id = R.dimen.button_height_large))
-                        .padding(horizontal = dimensionResource(id = R.dimen.spacer_small)),
-                    shape = RoundedCornerShape(dimensionResource(id = R.dimen.radius_medium)),
-                    colors = ButtonDefaults.buttonColors(containerColor = Color.Transparent),
-                    contentPadding = PaddingValues()
-                ) {
-                    Box(
+                    // Add ip camera Button
+                    Button(
+                        onClick = {
+                            onShowIPCamera()
+                        },
                         modifier = Modifier
-                            .fillMaxSize()
-                            .background(primaryGradient),
-                        contentAlignment = Alignment.Center
+                            .fillMaxWidth()
+                            .height(dimensionResource(id = R.dimen.button_height_large))
+                            .padding(horizontal = dimensionResource(id = R.dimen.spacer_small)),
+                        shape = RoundedCornerShape(dimensionResource(id = R.dimen.radius_medium)),
+                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF262B33))
                     ) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(Icons.Default.Link, contentDescription = null, tint = Color.White)
+                            Spacer(modifier = Modifier.width(dimensionResource(id = R.dimen.spacer_small)))
                             Text(
-                                stringResource(id = R.string.send_link),
-                                color = Color(0xFF1B263B),
+                                stringResource(id = R.string.add_ip_camera),
+                                color = Color.White,
                                 fontWeight = FontWeight.Medium,
                                 fontSize = with(density) { dimensionResource(id = R.dimen.text_subtitle).toSp() }
                             )
-                            Spacer(modifier = Modifier.width(dimensionResource(id = R.dimen.spacer_small)))
-                            Icon(
-                                Icons.AutoMirrored.Filled.ArrowForward,
-                                contentDescription = null,
-                                tint = Color(0xFF1B263B)
-                            )
                         }
                     }
-                }
 
-                Spacer(modifier = Modifier.height(dimensionResource(id = R.dimen.element_spacing)))
+                    Spacer(modifier = Modifier.height(dimensionResource(id = R.dimen.element_spacing)))
 
-                // Add ip camera Button
-                Button(
-                    onClick = {
-                        onShowIPCamera()
-                    },
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(dimensionResource(id = R.dimen.button_height_large))
-                        .padding(horizontal = dimensionResource(id = R.dimen.spacer_small)),
-                    shape = RoundedCornerShape(dimensionResource(id = R.dimen.radius_medium)),
-                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF262B33))
-                ) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Icon(Icons.Default.Link, contentDescription = null, tint = Color.White)
+                    // Need help text
+
+                    Spacer(modifier = Modifier.height(dimensionResource(id = R.dimen.spacer_small)))
+
+                    Row(
+                        modifier = Modifier
+                            .clickable { onNavigateToHelp() }
+                            .padding(dimensionResource(id = R.dimen.spacer_small)),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(
+                            imageVector = Icons.AutoMirrored.Outlined.HelpOutline,
+                            contentDescription = null,
+                            tint = textGrey,
+                            modifier = Modifier.size(dimensionResource(id = R.dimen.icon_size_small))
+                        )
                         Spacer(modifier = Modifier.width(dimensionResource(id = R.dimen.spacer_small)))
                         Text(
-                            stringResource(id = R.string.add_ip_camera),
-                            color = Color.White,
-                            fontWeight = FontWeight.Medium,
-                            fontSize = with(density) { dimensionResource(id = R.dimen.text_subtitle).toSp() }
+                            text = stringResource(id = R.string.need_help_text),
+                            color = textGrey,
+                            fontSize = with(density) { dimensionResource(id = R.dimen.text_small).toSp() },
+                            fontWeight = FontWeight.Medium
                         )
                     }
+
+                    Spacer(modifier = Modifier.height(dimensionResource(id = R.dimen.screen_padding)))
                 }
-
-                Spacer(modifier = Modifier.height(dimensionResource(id = R.dimen.element_spacing)))
-
-                // Need help text
-
-                Spacer(modifier = Modifier.height(dimensionResource(id = R.dimen.spacer_small)))
-
-                Row(
-                    modifier = Modifier
-                        .clickable { onNavigateToHelp() }
-                        .padding(dimensionResource(id = R.dimen.spacer_small)),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Icon(
-                        imageVector = Icons.AutoMirrored.Outlined.HelpOutline,
-                        contentDescription = null,
-                        tint = textGrey,
-                        modifier = Modifier.size(dimensionResource(id = R.dimen.icon_size_small))
-                    )
-                    Spacer(modifier = Modifier.width(dimensionResource(id = R.dimen.spacer_small)))
-                    Text(
-                        text = stringResource(id = R.string.need_help_text),
-                        color = textGrey,
-                        fontSize = with(density) { dimensionResource(id = R.dimen.text_small).toSp() },
-                        fontWeight = FontWeight.Medium
-                    )
-                }
-
-                Spacer(modifier = Modifier.height(dimensionResource(id = R.dimen.screen_padding)))
             }
         }
-    }
 
-    Spacer(modifier = Modifier.height(dimensionResource(id = R.dimen.spacer_medium)))
-}
+        Spacer(modifier = Modifier.height(dimensionResource(id = R.dimen.spacer_medium)))
+    }
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -875,10 +885,11 @@ fun IPCameraSetupDialog(
 
                 if (showScanner) {
                     // Network Scanner UI
-                    val subnet = remember { networkScanner.getSubnet(networkScanner.getDeviceIp(context)) }
+                    val subnet =
+                        remember { networkScanner.getSubnet(networkScanner.getDeviceIp(context)) }
 
                     val density = LocalDensity.current
-                    
+
                     Column(
                         modifier = Modifier
                             .fillMaxSize()
@@ -917,7 +928,10 @@ fun IPCameraSetupDialog(
                                         modifier = Modifier
                                             .fillMaxWidth()
                                             .align(Alignment.TopCenter)
-                                            .padding(horizontal = dimensionResource(id = R.dimen.spacer_small), vertical = dimensionResource(id = R.dimen.spacer_micro))
+                                            .padding(
+                                                horizontal = dimensionResource(id = R.dimen.spacer_small),
+                                                vertical = dimensionResource(id = R.dimen.spacer_micro)
+                                            )
                                     ) {
                                         LinearProgressIndicator(
                                             progress = { scanProgress },
@@ -978,7 +992,8 @@ fun IPCameraSetupDialog(
                             ) {
                                 Row(verticalAlignment = Alignment.CenterVertically) {
                                     // Animated Dot
-                                    val infiniteTransition = rememberInfiniteTransition(label = "blink")
+                                    val infiniteTransition =
+                                        rememberInfiniteTransition(label = "blink")
                                     val alpha by infiniteTransition.animateFloat(
                                         initialValue = 1f,
                                         targetValue = 0f,
@@ -996,16 +1011,28 @@ fun IPCameraSetupDialog(
                                         modifier = Modifier
                                             .size(dimensionResource(id = R.dimen.spacer_small))
                                             .clip(androidx.compose.foundation.shape.CircleShape)
-                                            .background(if (isScanComplete) Color(0xFF4CAF50) else Color(0xFFE57373).copy(alpha = if (isScanComplete) 1f else alpha))
+                                            .background(
+                                                if (isScanComplete) Color(0xFF4CAF50) else Color(
+                                                    0xFFE57373
+                                                ).copy(alpha = if (isScanComplete) 1f else alpha)
+                                            )
                                     )
                                     Spacer(modifier = Modifier.width(dimensionResource(id = R.dimen.spacer_small)))
                                     Text(
-                                        text = if (isScanComplete) "COMPLETED" else stringResource(id = R.string.scanning),
+                                        text = if (isScanComplete) "COMPLETED" else stringResource(
+                                            id = R.string.scanning
+                                        ),
                                         color = Color.White,
                                         fontSize = with(density) { dimensionResource(id = R.dimen.text_caption).toSp() },
                                         fontWeight = FontWeight.Bold,
-                                        letterSpacing = with(LocalDensity.current) { dimensionResource(id = R.dimen.spacer_tiny).toSp() },
-                                        modifier = if (isScanComplete) Modifier else Modifier.graphicsLayer(alpha = alpha)
+                                        letterSpacing = with(LocalDensity.current) {
+                                            dimensionResource(
+                                                id = R.dimen.spacer_tiny
+                                            ).toSp()
+                                        },
+                                        modifier = if (isScanComplete) Modifier else Modifier.graphicsLayer(
+                                            alpha = alpha
+                                        )
                                     )
                                 }
 
@@ -1036,7 +1063,11 @@ fun IPCameraSetupDialog(
                                             showScanner = false
                                         },
                                     colors = CardDefaults.cardColors(containerColor = cardBg),
-                                    elevation = CardDefaults.cardElevation(defaultElevation = dimensionResource(id = R.dimen.spacer_nano))
+                                    elevation = CardDefaults.cardElevation(
+                                        defaultElevation = dimensionResource(
+                                            id = R.dimen.spacer_nano
+                                        )
+                                    )
                                 ) {
                                     Row(
                                         modifier = Modifier.padding(dimensionResource(id = R.dimen.card_padding)),
@@ -1106,22 +1137,28 @@ fun IPCameraSetupDialog(
                                     isScanComplete = false
                                     networkScanner.cancel()
                                     // Trigger a re-scan by toggling or just calling it
-                                            // In this setup, we can just call scan again
-                                            foundDevices.clear()
-                                            networkScanner.scan(context, object : NetworkScanner.ScanCallback {
-                                                override fun onProgress(scanned: Int, total: Int, ip: String) {
-                                                    scanProgress = scanned.toFloat() / total.toFloat()
-                                                }
+                                    // In this setup, we can just call scan again
+                                    foundDevices.clear()
+                                    networkScanner.scan(
+                                        context,
+                                        object : NetworkScanner.ScanCallback {
+                                            override fun onProgress(
+                                                scanned: Int,
+                                                total: Int,
+                                                ip: String
+                                            ) {
+                                                scanProgress = scanned.toFloat() / total.toFloat()
+                                            }
 
-                                                override fun onDeviceFound(device: NetworkScanner.FoundDevice) {
-                                                    foundDevices.add(device)
-                                                }
+                                            override fun onDeviceFound(device: NetworkScanner.FoundDevice) {
+                                                foundDevices.add(device)
+                                            }
 
-                                                override fun onScanComplete(devices: List<NetworkScanner.FoundDevice>) {
-                                                    isScanComplete = true
-                                                }
-                                            })
-                                        },
+                                            override fun onScanComplete(devices: List<NetworkScanner.FoundDevice>) {
+                                                isScanComplete = true
+                                            }
+                                        })
+                                },
                                 modifier = Modifier
                                     .weight(1f)
                                     .height(dimensionResource(id = R.dimen.button_height)),
@@ -1162,7 +1199,7 @@ fun IPCameraSetupDialog(
                 } else {
                     // Camera Setup Form - Based on XML layout provided
                     val density = LocalDensity.current
-                    
+
                     LazyColumn(
                         modifier = Modifier
                             .fillMaxSize()
@@ -1213,7 +1250,10 @@ fun IPCameraSetupDialog(
                                 modifier = Modifier
                                     .fillMaxWidth()
                                     .height(dimensionResource(id = R.dimen.button_height))
-                                    .background(cardBg, RoundedCornerShape(dimensionResource(id = R.dimen.radius_small)))
+                                    .background(
+                                        cardBg,
+                                        RoundedCornerShape(dimensionResource(id = R.dimen.radius_small))
+                                    )
                                     .border(
                                         dimensionResource(id = R.dimen.spacer_tiny),
                                         Color.White.copy(alpha = 0.1f),
@@ -1536,7 +1576,7 @@ fun IPCameraSetupDialog(
                                         }
 
                                         cameraViewModel.saveRoomDevice(device)
-                                        
+
                                         val message = if (deviceToEdit != null) {
                                             cameraUpdated
                                         } else {

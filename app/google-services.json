@@ -23,6 +23,14 @@
           }
         },
         {
+          "client_id": "631262973007-dt684o42smh6aqubv16pbbbjli75u3oc.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "monitoringcamera.transmitterconnect.officeconnectcamera",
+            "certificate_hash": "55fff9442f5e7caa3ea4c9d47c90b46b6e1b736f"
+          }
+        },
+        {
           "client_id": "631262973007-si3le56rckfu34af4qrlj430t4rd7r3s.apps.googleusercontent.com",
           "client_type": 3
         }

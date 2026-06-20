@@ -72,7 +72,7 @@ fun RegistrationHeader(
                             if (isActive) {
                                 val frameworkPaint = android.graphics.Paint().apply {
                                     isAntiAlias = true
-                                    color = Color(0xFF00CFFF).toArgb()
+                                    color = Color(0xFFBBC6E2).toArgb()
                                     maskFilter = BlurMaskFilter(15f, BlurMaskFilter.Blur.OUTER)
                                 }
                                 drawIntoCanvas { canvas ->
@@ -85,7 +85,7 @@ fun RegistrationHeader(
                             }
                         }
                         .background(
-                            if (isActive) Color(0xFF00CFFF) else Color.White.copy(alpha = 0.1f),
+                            if (isActive) Color(0xFFBBC6E2) else Color.White.copy(alpha = 0.1f),
                             RoundedCornerShape(3.dp)
                         )
                 )
@@ -112,7 +112,7 @@ fun RegistrationStepIndicator(currentStep: Int) {
                         if (isActive) {
                             val frameworkPaint = android.graphics.Paint().apply {
                                 isAntiAlias = true
-                                color = Color(0xFF00CFFF).toArgb()
+                                color = Color(0xFFBBC6E2).toArgb()
                                 maskFilter = BlurMaskFilter(15f, BlurMaskFilter.Blur.OUTER)
                             }
                             drawIntoCanvas { canvas ->
@@ -125,7 +125,7 @@ fun RegistrationStepIndicator(currentStep: Int) {
                         }
                     }
                     .background(
-                        if (isActive) Color(0xFF00CFFF) else Color.White.copy(alpha = 0.1f),
+                        if (isActive) Color(0xFFBBC6E2) else Color.White.copy(alpha = 0.1f),
                         RoundedCornerShape(3.dp)
                     )
             )
@@ -166,11 +166,11 @@ fun SocialAndFooter(
         val annotatedString = buildAnnotatedString {
             withStyle(style = SpanStyle(color = Color(0xFF9CAAC0).copy(alpha = 0.6f))) { append("By creating an account you agree to our ") }
             pushStringAnnotation(tag = "TERMS", annotation = "terms")
-            withStyle(style = SpanStyle(color = Color(0xFF00CFFF), fontWeight = FontWeight.Bold)) { append("Terms") }
+            withStyle(style = SpanStyle(color = Color(0xFFBBC6E2), fontWeight = FontWeight.Bold)) { append("Terms") }
             pop()
             withStyle(style = SpanStyle(color = Color(0xFF9CAAC0).copy(alpha = 0.6f))) { append(" & ") }
             pushStringAnnotation(tag = "POLICY", annotation = "policy")
-            withStyle(style = SpanStyle(color = Color(0xFF00CFFF), fontWeight = FontWeight.Bold)) { append("Privacy Policy") }
+            withStyle(style = SpanStyle(color = Color(0xFFBBC6E2), fontWeight = FontWeight.Bold)) { append("Privacy Policy") }
             pop()
         }
         ClickableText(text = annotatedString, style = TextStyle(fontSize = 12.sp, textAlign = TextAlign.Center), onClick = { offset ->
@@ -180,7 +180,7 @@ fun SocialAndFooter(
         Spacer(modifier = Modifier.height(24.dp))
         Row(verticalAlignment = Alignment.CenterVertically) {
             Text("Already have an account? ", color = Color(0xFF9CAAC0), fontSize = 14.sp)
-            Text("Log in", color = Color(0xFF00CFFF), fontWeight = FontWeight.Bold, fontSize = 14.sp, modifier = Modifier.clickable { focusManager.clearFocus(); onBackToLogin() })
+            Text("Log in", color = Color(0xFFBBC6E2), fontWeight = FontWeight.Bold, fontSize = 14.sp, modifier = Modifier.clickable { focusManager.clearFocus(); onBackToLogin() })
         }
     }
 }
@@ -188,7 +188,7 @@ fun SocialAndFooter(
 @Composable
 fun PasswordCriteriaItem(text: String, isMet: Boolean) {
     Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(vertical = 4.dp)) {
-        Box(modifier = Modifier.size(6.dp).background(if (isMet) Color(0xFF00CFFF) else Color.White.copy(alpha = 0.2f), RoundedCornerShape(1.dp)).graphicsLayer { rotationZ = 45f })
+        Box(modifier = Modifier.size(6.dp).background(if (isMet) Color(0xFFBBC6E2) else Color.White.copy(alpha = 0.2f), RoundedCornerShape(1.dp)).graphicsLayer { rotationZ = 45f })
         Spacer(modifier = Modifier.width(12.dp))
         Text(text = text, fontSize = 13.sp, color = if (isMet) Color.White else Color(0xFF9CAAC0).copy(alpha = 0.6f))
     }

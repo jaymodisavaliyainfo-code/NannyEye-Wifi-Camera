@@ -104,14 +104,14 @@ fun RegistrationStep2Screen(
                                 if (isCurrent) {
                                     val frameworkPaint = android.graphics.Paint().apply {
                                         isAntiAlias = true
-                                        color = Color(0xFF00CFFF).toArgb()
+                                        color = Color(0xFFBBC6E2).toArgb()
                                         maskFilter = BlurMaskFilter(15f, BlurMaskFilter.Blur.OUTER)
                                     }
                                     drawIntoCanvas { canvas -> canvas.nativeCanvas.drawRoundRect(0f, 0f, size.width, size.height, 12.dp.toPx(), 12.dp.toPx(), frameworkPaint) }
                                 }
                             }
                             .background(Color(0xFF141A28).copy(alpha = 0.18f), RoundedCornerShape(12.dp))
-                            .border(1.dp, if (isCurrent) Color(0xFF00CFFF) else Color.White.copy(alpha = 0.1f), RoundedCornerShape(12.dp)),
+                            .border(1.dp, if (isCurrent) Color(0xFFBBC6E2) else Color.White.copy(alpha = 0.1f), RoundedCornerShape(12.dp)),
                         contentAlignment = Alignment.Center
                     ) { Text(char, color = Color.White, fontSize = 20.sp, fontWeight = FontWeight.Bold) }
                 }
@@ -125,7 +125,7 @@ fun RegistrationStep2Screen(
 
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text("Didn't receive it? ", color = Color(0xFF9CAAC0).copy(alpha = 0.6f), fontSize = 13.sp)
-                Text(if (viewModel.mobileResendCooldown > 0) "Resend in ${viewModel.mobileResendCooldown}s" else "Resend", color = if (viewModel.mobileResendCooldown == 0) Color(0xFF00CFFF) else Color.Gray, fontWeight = FontWeight.Bold, fontSize = 13.sp, modifier = Modifier.clickable(enabled = viewModel.mobileResendCooldown == 0) { 
+                Text(if (viewModel.mobileResendCooldown > 0) "Resend in ${viewModel.mobileResendCooldown}s" else "Resend", color = if (viewModel.mobileResendCooldown == 0) Color(0xFFBBC6E2) else Color.Gray, fontWeight = FontWeight.Bold, fontSize = 13.sp, modifier = Modifier.clickable(enabled = viewModel.mobileResendCooldown == 0) {
                     if (viewModel.mobileResendCooldown == 0) {
                         val options = PhoneAuthOptions.newBuilder(auth)
                             .setPhoneNumber(viewModel.fullPhoneNumber)

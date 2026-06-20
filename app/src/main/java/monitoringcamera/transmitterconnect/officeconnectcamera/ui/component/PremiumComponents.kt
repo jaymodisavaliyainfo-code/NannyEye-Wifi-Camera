@@ -77,7 +77,7 @@ fun PremiumGlassTextField(
                     // Futuristic Neon Outer Glow (Only on the outside)
                     val frameworkPaint = android.graphics.Paint().apply {
                         isAntiAlias = true
-                        color = Color(0xFF1F7995).toArgb()
+                        color = Color(0xFFBBC6E2).toArgb()
                         maskFilter = BlurMaskFilter(25f, BlurMaskFilter.Blur.OUTER)
                     }
                     drawIntoCanvas { canvas ->
@@ -97,8 +97,8 @@ fun PremiumGlassTextField(
                 width = 1.dp,
                 brush = Brush.verticalGradient(
                     listOf(
-                        if (isFocused && enabled) Color(0xFF1F7995) else Color.White.copy(alpha = 0.12f),
-                        if (isFocused && enabled) Color(0xFF1F7995).copy(alpha = 0.4f) else Color.Transparent
+                        if (isFocused && enabled) Color(0xFFBBC6E2) else Color.White.copy(alpha = 0.12f),
+                        if (isFocused && enabled) Color(0xFFBBC6E2).copy(alpha = 0.4f) else Color.Transparent
                     )
                 ),
                 shape = RoundedCornerShape(12.dp)
@@ -123,7 +123,7 @@ fun PremiumGlassTextField(
                         Icon(
                             leadingIcon,
                             contentDescription = null,
-                            tint = if (isFocused && enabled) Color(0xFF1F7995) else Color(0xFF5C6B7F),
+                            tint = if (isFocused && enabled) Color(0xFFBBC6E2) else Color(0xFF5C6B7F),
                             modifier = Modifier.size(22.dp)
                         )
                     }
@@ -151,7 +151,7 @@ fun PremiumGlassTextField(
                 unfocusedContainerColor = Color.Transparent,
                 focusedBorderColor = Color.Transparent,
                 unfocusedBorderColor = Color.Transparent,
-                cursorColor = Color(0xFF1F7995)
+                cursorColor = Color(0xFFBBC6E2)
             ),
             shape = RoundedCornerShape(32.dp),
             singleLine = true,
@@ -177,8 +177,8 @@ fun PremiumButton(
             .height(62.dp)
             .background(
                 brush = Brush.horizontalGradient(
-                    colors = if (enabled) listOf(Color(0xFF455A8A), Color(0xFF22335C)) 
-                            else listOf(Color(0xFF455A8A).copy(alpha = 0.5f), Color(0xFF22335C).copy(alpha = 0.5f))
+                    colors = if (enabled) listOf(Color(0xFFBBC6E2), Color(0xFF1B263B))
+                            else listOf(Color(0xFFBBC6E2).copy(alpha = 0.5f), Color(0xFF1B263B).copy(alpha = 0.5f))
                 ),
                 shape = RoundedCornerShape(16.dp)
             )

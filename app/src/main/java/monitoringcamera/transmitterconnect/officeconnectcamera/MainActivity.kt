@@ -84,7 +84,6 @@ import com.google.android.ump.FormError
 import com.google.android.ump.UserMessagingPlatform
 import kotlinx.coroutines.delay
 import monitoringcamera.transmitterconnect.officeconnectcamera.RetrofitResponce.DataItem
-import monitoringcamera.transmitterconnect.officeconnectcamera.ui.screen.CreateAccountScreen
 import monitoringcamera.transmitterconnect.officeconnectcamera.ui.screen.RegistrationStep1Screen
 import monitoringcamera.transmitterconnect.officeconnectcamera.ui.screen.RegistrationStep2Screen
 import monitoringcamera.transmitterconnect.officeconnectcamera.ui.screen.RegistrationStep3Screen
@@ -153,7 +152,14 @@ fun AppNavigation() {
             // Only navigate if we're not already on a login/intro/splash screen
             val currentRoute = navController.currentBackStackEntry?.destination?.route
             val authRoutes =
-                listOf("login", "intro", "splash", "phone_login", "email_login", "create_account")
+                listOf(
+                    "login",
+                    "intro",
+                    "splash",
+                    "phone_login",
+                    "email_login",
+                    "registration_step1"
+                )
             if (currentRoute != null && currentRoute !in authRoutes) {
                 navController.navigate("login") {
                     popUpTo(0) { inclusive = true }
@@ -200,12 +206,6 @@ fun AppNavigation() {
                         popUpTo("intro") { inclusive = true }
                     }
                 })
-        }
-        detailScreen("create_account") { _ ->
-            registrationViewModel.reset()
-            navController.navigate("registration_step1") {
-                popUpTo("login")
-            }
         }
         detailScreen("registration_step1") { _ ->
             RegistrationStep1Screen(
@@ -255,7 +255,7 @@ fun AppNavigation() {
                     }
                 },
                 onCreateAccountClick = {
-                    navController.navigate("create_account")
+                    navController.navigate("registration_step1")
                 }
             )
         }
@@ -454,13 +454,21 @@ fun SplashScreen(onTimeout: () -> Unit) {
             activeNetwork != null && (activeNetwork.type == ConnectivityManager.TYPE_WIFI || activeNetwork.type == ConnectivityManager.TYPE_MOBILE)
 
         if (hasInternet) {
-            startAdsFlow(activity, isMobileAdsInitializeCalled) {
+            /*startAdsFlow(activity, isMobileAdsInitializeCalled) {
                 loaderActive = true
-            }
+            }*/
+            activity.startActivity(Intent(activity, MainActivity::class.java).apply {
+                putExtra("skip_splash", true)
+            })
+            activity.finish()
         } else {
-            FacebookAds.getInstance(activity).AdsData(activity) {
+            activity.startActivity(Intent(activity, MainActivity::class.java).apply {
+                putExtra("skip_splash", true)
+            })
+            activity.finish()
+            /*FacebookAds.getInstance(activity).AdsData(activity) {
                 loaderActive = true
-            }
+            }*/
         }
     }
 
@@ -503,7 +511,10 @@ fun SplashScreen(onTimeout: () -> Unit) {
     LaunchedEffect(loaderProgress) {
         if (loaderProgress == 1f) {
             delay(500)
-            FacebookAds.getInstance(activity).showSplashAd(activity)
+            activity.startActivity(Intent(activity, MainActivity::class.java).apply {
+                putExtra("skip_splash", true)
+            })
+            activity.finish()
         }
     }
 

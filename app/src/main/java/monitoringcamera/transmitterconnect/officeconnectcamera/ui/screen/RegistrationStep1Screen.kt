@@ -175,7 +175,7 @@ fun RegistrationStep1Screen(
                 listOf("EMAIL", "MOBILE").forEach { tab ->
                     Box(
                         modifier = Modifier.weight(1f).fillMaxHeight()
-                            .background(if (viewModel.selectedTab == tab) Brush.verticalGradient(listOf(Color(0xFF455A8A), Color(0xFF22335C))) else SolidColor(Color.Transparent), RoundedCornerShape(14.dp))
+                            .background(if (viewModel.selectedTab == tab) Brush.horizontalGradient(listOf(Color(0xFFBBC6E2), Color(0xFF1B263B))) else SolidColor(Color.Transparent), RoundedCornerShape(14.dp))
                             .clickable { focusManager.clearFocus(); viewModel.selectedTab = tab },
                         contentAlignment = Alignment.Center
                     ) {
@@ -225,11 +225,11 @@ fun RegistrationStep1Screen(
                     Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
                         Text("Verification link sent. Check your inbox.", fontSize = 11.sp, color = Color.White.copy(alpha = 0.6f), modifier = Modifier.weight(1f))
                         TextButton(onClick = { auth.currentUser?.sendEmailVerification(); viewModel.resendCooldown = 60 }, enabled = viewModel.resendCooldown == 0) {
-                            Text(if (viewModel.resendCooldown > 0) "Resend in ${viewModel.resendCooldown}s" else "Resend", fontSize = 11.sp, color = if (viewModel.resendCooldown == 0) Color(0xFF00CFFF) else Color.Gray)
+                            Text(if (viewModel.resendCooldown > 0) "Resend in ${viewModel.resendCooldown}s" else "Resend", fontSize = 11.sp, color = if (viewModel.resendCooldown == 0) Color(0xFFBBC6E2) else Color.Gray)
                         }
                     }
                     TextButton(onClick = { viewModel.verificationSent = false; auth.signOut() }, contentPadding = PaddingValues(0.dp)) {
-                        Text("Change Email Address", fontSize = 11.sp, color = Color(0xFF00CFFF))
+                        Text("Change Email Address", fontSize = 11.sp, color = Color(0xFFBBC6E2))
                     }
                 }
             }

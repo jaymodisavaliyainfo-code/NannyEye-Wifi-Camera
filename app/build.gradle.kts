@@ -14,8 +14,8 @@ android {
         applicationId = "monitoringcamera.transmitterconnect.officeconnectcamera"
         minSdk = 24
         targetSdk = 36
-        versionCode = 2
-        versionName = "2.0"
+        versionCode = 4
+        versionName = "4.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
@@ -88,6 +88,7 @@ dependencies {
     implementation("com.airbnb.android:lottie-compose:6.3.0")
     implementation("com.google.accompanist:accompanist-systemuicontroller:0.36.0")
     implementation("com.github.alexeyvasilyev:rtsp-client-android:5.6.3")
+    implementation("com.android.billingclient:billing:8.0.0")
     implementation(libs.coil.compose)
     implementation(libs.libphonenumber)
 

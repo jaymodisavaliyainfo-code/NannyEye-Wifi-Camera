@@ -491,8 +491,8 @@ fun DashboardContent(navController: NavController, viewModel: CameraViewModel) {
                         .clip(RoundedCornerShape(dimensionResource(id = R.dimen.radius_medium)))
                         .background(primaryGradient)
                         .clickable {
-
-                            if (AdsDataHolder.adsData != null) {
+                            navController.navigate("add_device")
+                            /*if (AdsDataHolder.adsData != null) {
                                 FacebookAds.getInstance(activity).ShowInterstitial(
                                     activity,
                                     AdsDataHolder.adsData.checkAdPrivacyPolicyInter,
@@ -505,7 +505,7 @@ fun DashboardContent(navController: NavController, viewModel: CameraViewModel) {
                                     })
                             } else {
                                 navController.navigate("add_device")
-                            }
+                            }*/
                         }, contentAlignment = Alignment.Center
                 ) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
