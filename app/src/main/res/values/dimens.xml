@@ -1,0 +1,68 @@
+<resources>
+    <!-- Default dimensions for phones (Normal screens) -->
+
+    <!-- Text Sizes -->
+    <dimen name="text_h1">32sp</dimen>
+    <dimen name="text_h2">24sp</dimen>
+    <dimen name="text_title">20sp</dimen>
+    <dimen name="text_subtitle">18sp</dimen>
+    <dimen name="text_body">16sp</dimen>
+    <dimen name="text_small">14sp</dimen>
+    <dimen name="text_caption">12sp</dimen>
+    <dimen name="text_micro">10sp</dimen>
+    <dimen name="text_nano">8sp</dimen>
+    <dimen name="letter_spacing_tight">1sp</dimen>
+    <dimen name="letter_spacing_normal">0.5sp</dimen>
+    <dimen name="line_height_body">24sp</dimen>
+
+    <!-- Paddings and Margins -->
+    <dimen name="screen_padding">24dp</dimen>
+    <dimen name="screen_padding_small">16dp</dimen>
+    <dimen name="element_spacing">12dp</dimen>
+    <dimen name="card_padding">16dp</dimen>
+    <dimen name="section_spacing">50dp</dimen>
+    <dimen name="spacer_small">8dp</dimen>
+    <dimen name="spacer_micro">4dp</dimen>
+    <dimen name="spacer_nano">2dp</dimen>
+    <dimen name="spacer_tiny">1dp</dimen>
+    <dimen name="spacer_medium">16dp</dimen>
+    <dimen name="spacer_large">24dp</dimen>
+    <dimen name="padding_medium">20dp</dimen>
+    <dimen name="padding_micro">6dp</dimen>
+    <dimen name="border_thin">1dp</dimen>
+    <dimen name="spacer_none">0dp</dimen>
+
+    <!-- Component Sizes -->
+    <dimen name="button_height">56dp</dimen>
+    <dimen name="button_height_small">44dp</dimen>
+    <dimen name="button_height_large">64dp</dimen>
+    <dimen name="option_icon_container">56dp</dimen>
+    <dimen name="icon_size_tiny">12dp</dimen>
+    <dimen name="icon_size_small">18dp</dimen>
+    <dimen name="icon_size_medium_small">28dp</dimen>
+    <dimen name="icon_size_medium">40dp</dimen>
+    <dimen name="icon_size_standard">24dp</dimen>
+    <dimen name="icon_size_large">64dp</dimen>
+    <dimen name="lottie_splash_height">120dp</dimen>
+    <dimen name="thumbnail_size">70dp</dimen>
+    <dimen name="image_box_height">250dp</dimen>
+    <dimen name="status_bar_height">60dp</dimen>
+    <dimen name="bottom_nav_height">80dp</dimen>
+    <dimen name="qr_container_size">280dp</dimen>
+    <dimen name="qr_code_size">230dp</dimen>
+    <dimen name="qr_inner_size">200dp</dimen>
+    <dimen name="slider_height_large">160dp</dimen>
+    <dimen name="scanner_offset_top">140dp</dimen>
+
+    <!-- Corner Radii -->
+    <dimen name="radius_small">8dp</dimen>
+    <dimen name="radius_standard">12dp</dimen>
+    <dimen name="radius_medium">16dp</dimen>
+    <dimen name="radius_large">24dp</dimen>
+    <dimen name="radius_extra_large">32dp</dimen>
+
+    <!-- Elevations -->
+    <dimen name="elevation_small">2dp</dimen>
+    <dimen name="elevation_medium">4dp</dimen>
+    <dimen name="elevation_large">8dp</dimen>
+</resources>

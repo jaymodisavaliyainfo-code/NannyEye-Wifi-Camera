@@ -1,0 +1,28 @@
+<!--
+  ~ Copyright (C) 2026 The Android Open Source Project
+  ~
+  ~ Licensed under the Apache License, Version 2.0 (the "License");
+  ~ you may not use this file except in compliance with the License.
+  ~ You may obtain a copy of the License at
+  ~
+  ~      http://www.apache.org/licenses/LICENSE-2.0
+  ~
+  ~ Unless required by applicable law or agreed to in writing, software
+  ~ distributed under the License is distributed on an "AS IS" BASIS,
+  ~ WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+  ~ See the License for the specific language governing permissions and
+  ~ limitations under the License.
+  -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="18dp"
+    android:height="18dp"
+    android:viewportWidth="18"
+    android:viewportHeight="18">
+  <group>
+    <clip-path
+        android:pathData="M0,0h18v18h-18z"/>
+    <path
+        android:pathData="M18.27,5.421C18.269,4.824 18.032,4.251 17.609,3.829C17.187,3.407 16.615,3.169 16.017,3.169H8.577C8.383,2.816 8.099,2.522 7.753,2.317C7.408,2.111 7.013,2.002 6.611,2H2.914C2.317,2 1.744,2.237 1.321,2.659C0.899,3.081 0.661,3.653 0.66,4.25V13.75C0.661,14.347 0.899,14.919 1.321,15.341C1.744,15.763 2.317,16 2.914,16H16.017C16.615,15.999 17.187,15.762 17.609,15.339C18.031,14.917 18.269,14.345 18.27,13.748V6.407V5.421ZM16.017,4.397C16.289,4.397 16.549,4.505 16.741,4.697C16.933,4.889 17.041,5.149 17.041,5.421V5.801H10.453C10.257,5.801 10.065,5.744 9.9,5.638C9.735,5.532 9.604,5.381 9.522,5.203L9.153,4.397H16.017ZM17.043,13.75C17.042,14.021 16.933,14.281 16.741,14.472C16.549,14.664 16.289,14.771 16.017,14.771H2.914C2.642,14.771 2.382,14.663 2.19,14.471C1.998,14.279 1.89,14.019 1.89,13.748V4.25C1.891,3.979 1.999,3.719 2.191,3.528C2.383,3.337 2.643,3.229 2.914,3.228H6.61C6.806,3.229 6.997,3.285 7.162,3.391C7.327,3.497 7.458,3.648 7.54,3.826L8.406,5.714C8.586,6.106 8.874,6.438 9.237,6.671C9.6,6.905 10.022,7.029 10.453,7.029H17.043V13.75Z"
+        android:fillColor="#3E4147"/>
+  </group>
+</vector>

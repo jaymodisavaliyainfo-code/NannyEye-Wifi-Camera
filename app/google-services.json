@@ -1,0 +1,55 @@
+{
+  "project_info": {
+    "project_number": "631262973007",
+    "firebase_url": "https://nannyeye-1cc1a-default-rtdb.firebaseio.com",
+    "project_id": "nannyeye-1cc1a",
+    "storage_bucket": "nannyeye-1cc1a.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:631262973007:android:1e46349176523ca219ae3a",
+        "android_client_info": {
+          "package_name": "monitoringcamera.transmitterconnect.officeconnectcamera"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "631262973007-1qt24jqsqhk5cmqpjrlf2tfou6lbabv1.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "monitoringcamera.transmitterconnect.officeconnectcamera",
+            "certificate_hash": "55ac8343b78b7ec20237ee719bc89a5fc2c1a4eb"
+          }
+        },
+        {
+          "client_id": "631262973007-si3le56rckfu34af4qrlj430t4rd7r3s.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyC3L6iV_bW5X6wFjFzViHmx_51Kz6eOXPU"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "631262973007-si3le56rckfu34af4qrlj430t4rd7r3s.apps.googleusercontent.com",
+              "client_type": 3
+            },
+            {
+              "client_id": "631262973007-2p2ikmdi4dqreiten7nqe0rb5rt5k15p.apps.googleusercontent.com",
+              "client_type": 2,
+              "ios_info": {
+                "bundle_id": "monitoringcamera.transmitterconnect.officeconnectcamera"
+              }
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

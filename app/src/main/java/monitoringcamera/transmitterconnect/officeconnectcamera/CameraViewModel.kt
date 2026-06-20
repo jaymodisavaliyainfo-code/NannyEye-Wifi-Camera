@@ -1,0 +1,773 @@
+package monitoringcamera.transmitterconnect.officeconnectcamera
+
+import android.app.Application
+import android.content.Context
+import android.graphics.Bitmap
+import android.graphics.Color
+import android.hardware.camera2.CameraCharacteristics
+import android.hardware.camera2.CameraManager
+import android.media.AudioManager
+import android.os.Build
+import android.os.Environment
+import android.os.Handler
+import android.os.Looper
+import android.os.storage.StorageManager
+import android.util.Log
+import androidx.lifecycle.AndroidViewModel
+import androidx.lifecycle.LiveData
+import androidx.lifecycle.MutableLiveData
+import com.google.firebase.auth.FirebaseAuth
+import com.google.firebase.firestore.FirebaseFirestore
+import com.google.firebase.firestore.ListenerRegistration
+import com.google.firebase.firestore.Query
+import com.google.firebase.firestore.FieldValue
+import com.google.firebase.database.DataSnapshot
+import com.google.firebase.database.DatabaseError
+import com.google.firebase.database.FirebaseDatabase
+import com.google.firebase.database.ServerValue
+import com.google.firebase.database.ValueEventListener
+import com.google.zxing.BarcodeFormat
+import com.google.zxing.EncodeHintType
+import com.google.zxing.qrcode.QRCodeWriter
+import org.webrtc.SurfaceViewRenderer
+import org.webrtc.VideoSink
+import android.media.MediaMetadataRetriever
+import android.media.ThumbnailUtils
+import android.provider.MediaStore
+import android.widget.Toast
+import androidx.lifecycle.viewModelScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import java.io.File
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
+import java.util.UUID
+
+class CameraViewModel(application: Application) : AndroidViewModel(application) {
+    private val tag = "CameraViewModel"
+
+    val webRTCManager: WebRTCManager = WebRTCManager(application)
+    private val audioManager: AudioManager =
+        application.getSystemService(Context.AUDIO_SERVICE) as AudioManager
+
+    val myDeviceId = MutableLiveData<String>("")
+    val ViewerDeviceId = MutableLiveData<String>("")
+    val sessionId = MutableLiveData<String>("")
+    val deviceName = MutableLiveData<String>("")
+    val qrBitmap = MutableLiveData<Bitmap>()
+    val isConnected: LiveData<Boolean> = webRTCManager.connectionState
+    val sessionStatus: LiveData<String?> = webRTCManager.sessionStatus
+    val isFrontFacing: LiveData<Boolean> = webRTCManager.isFrontFacingLiveData
+
+    private val _connectedViewers = MutableLiveData<List<ViewerInfo>>(emptyList())
+    val connectedViewers: LiveData<List<ViewerInfo>> = _connectedViewers
+
+    private val _myCreatedSessions = MutableLiveData<List<SessionRecord>>(emptyList())
+    val myCreatedSessions: LiveData<List<SessionRecord>> = _myCreatedSessions
+
+    private val auth = FirebaseAuth.getInstance()
+    private val firestore = FirebaseFirestore.getInstance()
+    private var connectedCamerasListener: ListenerRegistration? = null
+    private var monitorCamerasListener: ListenerRegistration? = null
+    private var ipCamerasListener: ListenerRegistration? = null
+
+    // Persistent storage for settings and limits (kept for device-specific values)
+    private val settingsPrefs = application.getSharedPreferences("app_settings", Context.MODE_PRIVATE)
+    private val limitPrefs = application.getSharedPreferences("DailyLimitPrefs", Context.MODE_PRIVATE)
+
+    private val _savedDevices = MutableLiveData<List<DeviceMetadata>>(emptyList())
+    val savedDevices: LiveData<List<DeviceMetadata>> = _savedDevices
+
+    private val _roomDevices = MutableLiveData<List<Device>>(emptyList())
+    val roomDevices: LiveData<List<Device>> = _roomDevices
+
+    private val _videoRecords = MutableLiveData<List<VideoRecord>>(emptyList())
+    val videoRecords: LiveData<List<VideoRecord>> = _videoRecords
+
+    private val _isLoadingVideos = MutableLiveData(false)
+    val isLoadingVideos: LiveData<Boolean> = _isLoadingVideos
+
+    private val _usedSecondsToday = MutableLiveData(0)
+    val usedSecondsToday: LiveData<Int> = _usedSecondsToday
+
+    private val _dailyLimitSeconds = MutableLiveData(300)
+    val dailyLimitSeconds: LiveData<Int> = _dailyLimitSeconds
+
+    data class DeviceMetadata(
+        val deviceId: String = "",
+        val sessionId: String = "",
+        val name: String = "",
+        val timestamp: Long = 0L,
+        val role: String = "receiver" // "monitor" or "receiver"
+    )
+
+    data class SessionRecord(
+        val sessionId: String = "",
+        val deviceName: String = "",
+        val timestamp: Long = 0L,
+        val connectedDevices: List<String> = emptyList() // format: "id:name"
+    )
+
+    data class ViewerInfo(
+        val deviceId: String,
+        val name: String,
+        val status: String
+    )
+
+    data class VideoRecord(
+        val file: File,
+        val name: String,
+        val formattedDate: String,
+        val duration: String,
+        val thumbnail: Bitmap?,
+        val size: String
+    )
+
+    // Own the recording LiveData here — WebRTCManager's isRecordingLiveData is just a placeholder stub.
+    private val _isRecording = MutableLiveData(false)
+    val isRecording: LiveData<Boolean> = _isRecording
+
+    private val _sessionSeconds = MutableLiveData(0)
+    val sessionSeconds: LiveData<Int> = _sessionSeconds
+
+    private var recorderManager: RecorderManager? = null
+    var isAudio: Boolean = false
+
+    private val _isPaired = MutableLiveData(false)
+    val isPaired: LiveData<Boolean> = _isPaired
+
+    private val _isCreator = MutableLiveData(false)
+    val isCreator: LiveData<Boolean> = _isCreator
+
+    data class MonitorInfo(
+        val sessionId: String,
+        val isOccupied: Boolean = false
+    )
+
+    private val _onlineMonitors = MutableLiveData<Map<String, MonitorInfo>>(emptyMap()) // deviceId -> MonitorInfo
+    val onlineMonitors: LiveData<Map<String, MonitorInfo>> = _onlineMonitors
+
+    init {
+        val id = settingsPrefs?.getString("my_device_id", null)
+        val name = settingsPrefs?.getString("my_device_name", "${Build.MANUFACTURER} ${Build.MODEL}") ?: "${Build.MANUFACTURER} ${Build.MODEL}"
+
+        var dId = settingsPrefs?.getString("my_device_id", null)
+        if (dId == null) {
+            dId = UUID.randomUUID().toString().replace("-", "").substring(0, 10)
+            settingsPrefs?.edit()?.putString("my_device_id", dId)?.apply()
+        }
+        myDeviceId.postValue(dId)
+        deviceName.postValue(name)
+
+        _isPaired.value = settingsPrefs?.getBoolean("is_paired", false) ?: false
+        _isCreator.value = settingsPrefs?.getBoolean("is_creator", false) ?: false
+
+        setupFirestoreListeners()
+        loadDailyLimit()
+
+        // Listen for all online monitors to enable stable reconnection
+        FirebaseDatabase.getInstance().getReference("monitors").addValueEventListener(object : ValueEventListener {
+            override fun onDataChange(snapshot: DataSnapshot) {
+                val map = mutableMapOf<String, MonitorInfo>()
+                for (child in snapshot.children) {
+                    val mId = child.key ?: continue
+                    val sId = child.child("activeSessionId").getValue(String::class.java) ?: continue
+                    val occupied = child.child("isOccupied").getValue(Boolean::class.java) ?: false
+                    map[mId] = MonitorInfo(sId, occupied)
+                }
+                _onlineMonitors.postValue(map)
+            }
+            override fun onCancelled(error: DatabaseError) {}
+        })
+
+        // Observe connection state to mark as paired
+        webRTCManager.connectionState.observeForever { connected ->
+            if (connected) {
+                if (_isPaired.value == false) {
+                    markAsPaired()
+                }
+                // When broadcaster connects, it becomes a creator
+                if (webRTCManager.isBroadcaster) {
+                    if (_isCreator.value == false) {
+                        markAsCreator()
+                    }
+
+                    // Save session record and device only when someone actually connects
+                    sessionId.value?.let { sid ->
+                        saveSessionRecord(sid)
+                        val name = deviceName.value ?: "${Build.MANUFACTURER} ${Build.MODEL}"
+                        saveDevice("monitor_$sid", sid, name, "monitor")
+                    }
+                }
+            }
+        }
+    }
+
+    fun markAsPaired() {
+        if (_isPaired.value == false) {
+            _isPaired.value = true
+            settingsPrefs.edit().putBoolean("is_paired", true).apply()
+        }
+    }
+
+    fun markAsCreator() {
+        if (_isCreator.value == false) {
+            // Lazy generate Device ID only when becoming a creator
+            var id = settingsPrefs.getString("my_device_id", null)
+            if (id == null) {
+                id = UUID.randomUUID().toString().replace("-", "").substring(0, 10)
+                settingsPrefs.edit().putString("my_device_id", id).apply()
+                myDeviceId.value = id
+            } else {
+                myDeviceId.value = id
+            }
+
+            _isCreator.value = true
+            settingsPrefs.edit().putBoolean("is_creator", true).apply()
+        }
+    }
+
+    fun generateHostSession() {
+        _sessionSeconds.postValue(0)
+        val allowedChars = ('A'..'Z') + ('a'..'z') + ('0'..'9')
+        val newSessionId = (1..10).map { allowedChars.random() }.joinToString("")
+        sessionId.value = newSessionId
+
+        listenForViewers(newSessionId)
+
+        // Create JSON for QR Code
+        val qrJson = """
+            {
+                "device_id": "${myDeviceId.value}",
+                "session_id": "$newSessionId",
+                "role": "HOST",
+                "name": "${deviceName.value}"
+            }
+        """.trimIndent()
+
+        generateQrCode(qrJson)
+    }
+
+    private fun loadDailyLimit() {
+        val today = SimpleDateFormat("yyyyMMdd", Locale.getDefault()).format(Date())
+        val lastDate = limitPrefs.getString("last_date", "")
+
+        if (today != lastDate) {
+            _usedSecondsToday.postValue(0)
+            limitPrefs.edit().putInt("used_seconds", 0).putString("last_date", today).apply()
+        } else {
+            _usedSecondsToday.postValue(limitPrefs.getInt("used_seconds", 0))
+        }
+
+        _dailyLimitSeconds.postValue(limitPrefs.getInt("daily_limit", 300))
+    }
+
+    fun incrementUsedSeconds() {
+        val current = (_usedSecondsToday.value ?: 0) + 1
+        _usedSecondsToday.postValue(current)
+
+        val sess = (_sessionSeconds.value ?: 0) + 1
+        _sessionSeconds.postValue(sess)
+
+        if (current % 10 == 0) {
+            limitPrefs.edit().putInt("used_seconds", current).apply()
+        }
+    }
+
+    fun extendLimit(seconds: Int) {
+        val newLimit = (_dailyLimitSeconds.value ?: 300) + seconds
+        _dailyLimitSeconds.postValue(newLimit)
+        limitPrefs.edit().putInt("daily_limit", newLimit).apply()
+    }
+
+    fun saveFinalUsedSeconds() {
+        limitPrefs.edit().putInt("used_seconds", _usedSecondsToday.value ?: 0).apply()
+    }
+
+    fun updateDeviceName(newName: String) {
+        deviceName.postValue(newName)
+        settingsPrefs.edit().putString("my_device_name", newName).apply()
+    }
+
+    private fun setupFirestoreListeners() {
+        val uid = auth.currentUser?.uid ?: return
+
+        // 1. Connected Cameras (Other Saved Devices)
+        connectedCamerasListener = firestore.collection("users").document(uid)
+            .collection("ConnectedCameras")
+            .orderBy("timestamp", Query.Direction.DESCENDING)
+            .addSnapshotListener { snapshot, e ->
+                if (e != null) return@addSnapshotListener
+                val devices = snapshot?.toObjects(DeviceMetadata::class.java) ?: emptyList()
+                _savedDevices.postValue(devices)
+            }
+
+        // 2. Monitor Cameras (Recent Sessions)
+        monitorCamerasListener = firestore.collection("users").document(uid)
+            .collection("MonitorCameras")
+            .orderBy("timestamp", Query.Direction.DESCENDING)
+            .addSnapshotListener { snapshot, e ->
+                if (e != null) return@addSnapshotListener
+                val sessions = snapshot?.toObjects(SessionRecord::class.java) ?: emptyList()
+                _myCreatedSessions.postValue(sessions)
+            }
+
+        // 3. IP Cameras (Room Devices)
+        ipCamerasListener = firestore.collection("users").document(uid)
+            .collection("IPCameras")
+            .addSnapshotListener { snapshot, e ->
+                if (e != null) return@addSnapshotListener
+                val devices = snapshot?.toObjects(Device::class.java) ?: emptyList()
+                _roomDevices.postValue(devices)
+            }
+    }
+
+    fun saveRoomDevice(device: Device) {
+        val uid = auth.currentUser?.uid ?: return
+        val docId = if (device.id.isNotEmpty()) device.id else UUID.randomUUID().toString()
+        val finalDevice = if (device.id.isEmpty()) device.copy(id = docId) else device
+        
+        firestore.collection("users").document(uid)
+            .collection("IPCameras").document(docId)
+            .set(finalDevice)
+    }
+
+    fun deleteRoomDevice(device: Device) {
+        val uid = auth.currentUser?.uid ?: return
+        if (device.id.isEmpty()) return
+        firestore.collection("users").document(uid)
+            .collection("IPCameras").document(device.id)
+            .delete()
+    }
+
+    private val _recordVideos = MutableLiveData<List<VideoRecord>>(emptyList())
+    val recordVideos: LiveData<List<VideoRecord>> = _recordVideos
+
+    private val _monitorVideos = MutableLiveData<List<VideoRecord>>(emptyList())
+    val monitorVideos: LiveData<List<VideoRecord>> = _monitorVideos
+
+    private val _ipCameraVideos = MutableLiveData<List<VideoRecord>>(emptyList())
+    val ipCameraVideos: LiveData<List<VideoRecord>> = _ipCameraVideos
+
+    fun refreshVideoRecords(filterDate: Date? = null) {
+        viewModelScope.launch {
+            _isLoadingVideos.value = true
+            withContext(Dispatchers.IO) {
+                val downloadDir = File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS), "Sentinel Video")
+                if (!downloadDir.exists()) {
+                    _videoRecords.postValue(emptyList())
+                    _recordVideos.postValue(emptyList())
+                    _monitorVideos.postValue(emptyList())
+                    _ipCameraVideos.postValue(emptyList())
+                    return@withContext
+                }
+
+                var files = downloadDir.listFiles { file ->
+                    val extensions = listOf("mp4", "mkv", "3gp", "webm", "avi", "m4a")
+                    extensions.any { ext -> file.extension.equals(ext, ignoreCase = true) }
+                }?.toList() ?: emptyList()
+
+                if (filterDate != null) {
+                    val sdf = SimpleDateFormat("yyyyMMdd", Locale.getDefault())
+                    val filterDateStr = sdf.format(filterDate)
+                    files = files.filter {
+                        val fileDateStr = sdf.format(Date(it.lastModified()))
+                        fileDateStr == filterDateStr
+                    }
+                }
+
+                files = files.sortedByDescending { it.lastModified() }
+
+                val allRecords = files.map { file -> createVideoRecord(file) }
+
+                // Categorize
+                // 1. Ip Camera: Starts with RTSP_
+                val ipVideos = allRecords.filter { it.name.startsWith("RTSP_") }
+
+                // 2. Monitor Videos: Ends with .m4a or starts with MON_
+                val monitorVids = allRecords.filter { it.file.extension == "m4a" || it.name.startsWith("MON_") }
+
+                // 3. Record Videos (Phone): Starts with REC_ and is NOT a monitor video
+                val phoneVids = allRecords.filter { it.name.startsWith("REC_") && it.file.extension != "m4a" && !it.name.startsWith("MON_") }
+
+                _videoRecords.postValue(allRecords)
+                _recordVideos.postValue(phoneVids)
+                _monitorVideos.postValue(monitorVids)
+                _ipCameraVideos.postValue(ipVideos)
+            }
+            _isLoadingVideos.value = false
+        }
+    }
+
+    private fun createVideoRecord(file: File): VideoRecord {
+        val date = Date(file.lastModified())
+        val formatter = SimpleDateFormat("dd MMM yyyy, HH:mm", Locale.getDefault())
+        val formattedDate = formatter.format(date)
+
+        var durationStr = "0s"
+        var thumbnail: Bitmap? = null
+        try {
+            val retriever = MediaMetadataRetriever()
+            retriever.setDataSource(file.absolutePath)
+            val time = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION)
+            retriever.release()
+            val durationMs = time?.toLong() ?: 0
+            durationStr = "${(durationMs / 1000)}s"
+
+            thumbnail = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                ThumbnailUtils.createVideoThumbnail(
+                    file,
+                    android.util.Size(120, 120),
+                    null
+                )
+            } else {
+                @Suppress("DEPRECATION")
+                ThumbnailUtils.createVideoThumbnail(
+                    file.absolutePath,
+                    MediaStore.Video.Thumbnails.MINI_KIND
+                )
+            }
+        } catch (e: Exception) {
+            // Log.e(tag, "Error extracting metadata for ${file.name}: ${e.message}")
+        }
+
+        return VideoRecord(
+            file = file,
+            name = file.name,
+            formattedDate = formattedDate,
+            duration = durationStr,
+            thumbnail = thumbnail,
+            size = "${(file.length() / 1024)} KB"
+        )
+    }
+
+    fun saveDevice(deviceId: String, sessionId: String, name: String, role: String = "receiver") {
+        val uid = auth.currentUser?.uid ?: return
+        val device = DeviceMetadata(deviceId, sessionId, name, System.currentTimeMillis(), role)
+        firestore.collection("users").document(uid)
+            .collection("ConnectedCameras").document(deviceId)
+            .set(device)
+    }
+
+    fun fetchAndSaveDeviceMetadata(sessionId: String, role: String = "receiver") {
+        val database = FirebaseDatabase.getInstance()
+        database.getReference("sessions/$sessionId/metadata").addListenerForSingleValueEvent(object : ValueEventListener {
+            override fun onDataChange(snapshot: DataSnapshot) {
+                val name = snapshot.child("name").getValue(String::class.java) ?: "Unknown Device"
+                val deviceId = snapshot.child("deviceId").getValue(String::class.java) ?: "unknown_$sessionId"
+                saveDevice(deviceId, sessionId, name, role)
+            }
+            override fun onCancelled(error: DatabaseError) {}
+        })
+    }
+
+    fun deleteSavedDevice(deviceId: String) {
+        val uid = auth.currentUser?.uid ?: return
+        firestore.collection("users").document(uid)
+            .collection("ConnectedCameras").document(deviceId)
+            .delete()
+    }
+
+    fun takeScreenshot(context: android.content.Context, isLocal: Boolean = true): String? {
+        return webRTCManager.takeScreenshot(context, isLocal)
+    }
+
+    private fun saveSessionRecord(sessionId: String) {
+        val uid = auth.currentUser?.uid ?: return
+        val name = deviceName.value ?: ""
+        val record = SessionRecord(sessionId, name, System.currentTimeMillis())
+        firestore.collection("users").document(uid)
+            .collection("MonitorCameras").document(sessionId)
+            .set(record)
+    }
+
+    fun deleteSessionRecord(sessionId: String) {
+        val uid = auth.currentUser?.uid ?: return
+        firestore.collection("users").document(uid)
+            .collection("MonitorCameras").document(sessionId)
+            .delete()
+    }
+
+    fun resumeHostSession(sid: String) {
+        // If the user wants a NEW session starting from 00:00 every time,
+        // we should actually call generateHostSession() instead of using 'sid'.
+        // But we'll keep this method for internal use if needed.
+        sessionId.value = sid
+
+        listenForViewers(sid)
+    }
+
+    fun listenForViewers(sid: String) {
+        FirebaseDatabase.getInstance().getReference("sessions/$sid/viewers")
+            .addValueEventListener(object : ValueEventListener {
+                override fun onDataChange(snapshot: DataSnapshot) {
+                    val viewers = mutableListOf<ViewerInfo>()
+                    for (child in snapshot.children) {
+                        val status = child.child("status").getValue(String::class.java) ?: "Online"
+                        // Only show viewers that are currently Online
+                        if (status == "Online") {
+                            val dId = child.child("deviceId").getValue(String::class.java) ?: child.key ?: ""
+                            val name = child.child("name").getValue(String::class.java) ?: "Unknown"
+                            viewers.add(ViewerInfo(dId, name, status))
+
+                            // Map this device to the session locally
+                            updateSessionWithViewer(sid, dId, name)
+                        }
+                    }
+                    _connectedViewers.postValue(viewers)
+                }
+                override fun onCancelled(error: DatabaseError) {}
+            })
+    }
+
+    private fun updateSessionWithViewer(sid: String, viewerDeviceId: String, viewerName: String) {
+        val uid = auth.currentUser?.uid ?: return
+        val entry = "$viewerDeviceId:$viewerName"
+        firestore.collection("users").document(uid)
+            .collection("MonitorCameras").document(sid)
+            .update("connectedDevices", FieldValue.arrayUnion(entry))
+    }
+
+    private fun generateQrCode(content: String) {
+        Thread {
+            try {
+                val hints = HashMap<EncodeHintType, Any>()
+                hints[EncodeHintType.MARGIN] = 1
+
+                val writer = QRCodeWriter()
+                val bitMatrix = writer.encode(content, BarcodeFormat.QR_CODE, 512, 512, hints)
+
+                val bmp = Bitmap.createBitmap(512, 512, Bitmap.Config.RGB_565)
+
+                for (x in 0 until 512) {
+                    for (y in 0 until 512) {
+                        bmp.setPixel(x, y, if (bitMatrix.get(x, y)) Color.BLACK else Color.WHITE)
+                    }
+                }
+
+                qrBitmap.postValue(bmp)
+            } catch (e: Exception) {
+                Log.e(tag, "QR error: ${e.message}")
+            }
+        }.start()
+    }
+
+    fun startStreaming(localSink: VideoSink?, isAudio: Boolean, sid: String? = null) {
+        // If sid is "new" or we want a fresh start, clear the existing session
+        if (sid == "new") {
+            sessionId.value = ""
+        } else if (!sid.isNullOrEmpty()) {
+            resumeHostSession(sid)
+        }
+
+        // Always generate a fresh session if one isn't currently active
+        // this ensures every new entry into CameraViewScreen is a "new connection"
+        if (sessionId.value.isNullOrEmpty()) {
+            generateHostSession()
+        }
+
+        val sessionToUse = sessionId.value ?: return
+        val name = deviceName.value ?: "${Build.MANUFACTURER} ${Build.MODEL}"
+        val dId = myDeviceId.value ?: ""
+
+        /*// Ensure we are marked as Live when starting streaming if not already done via resumeHostSession
+        val ref = FirebaseDatabase.getInstance().getReference("SaveSessions/$dId")
+        ref.setValue(sessionToUse)
+        ref.onDisconnect().removeValue()*/
+
+        webRTCManager.startCameraAndOffer(
+            sessionToUse,
+            dId,
+            localSink,
+            isAudio,
+            name,
+            object : WebRTCManager.OfferCallback {
+                override fun onOfferCreated(sdp: String) {
+                    Log.d(tag, "Offer created for session: $sessionToUse")
+                }
+            })
+    }
+
+    fun initRenderer(renderer: SurfaceViewRenderer, isLocal: Boolean = true) {
+        webRTCManager.initSurfaceViewRenderer(renderer, isLocal)
+        Log.d(tag, "Renderer initialized, isLocal: $isLocal")
+    }
+
+    fun startViewing(sessionId: String, remoteSink: VideoSink? = null) {
+        _sessionSeconds.postValue(0)
+        this.sessionId.postValue(sessionId)
+        val dId = myDeviceId.value ?: ""
+        val name = deviceName.value ?: "${Build.MANUFACTURER} ${Build.MODEL}"
+
+        // Register viewer in Firebase
+        val viewerRef = FirebaseDatabase.getInstance()
+            .getReference("sessions")
+            .child(sessionId)
+            .child("viewers")
+            .child(dId)
+
+        val viewerData = mapOf(
+            "name" to name,
+            "deviceId" to dId,
+            "status" to "Online",
+            "timestamp" to com.google.firebase.database.ServerValue.TIMESTAMP
+        )
+
+        viewerRef.setValue(viewerData)
+        viewerRef.onDisconnect().removeValue()
+
+        webRTCManager.connectAsViewer(sessionId, remoteSink, dId)
+    }
+
+    fun stopViewing(sink: VideoSink? = null) {
+        sink?.let { webRTCManager.removeRemoteSink(it) }
+        stop()
+    }
+
+    fun stopStreaming(sink: VideoSink? = null) {
+        sink?.let { webRTCManager.removeLocalSink(it) }
+        stop()
+    }
+
+    fun stop() {
+        // Remove from SaveSessions when stopping
+        val sid = sessionId.value
+        val did = myDeviceId.value
+        if (sid != null && did != null) {
+            FirebaseDatabase.getInstance().getReference("SaveSessions")
+                .child(did)
+                .child(sid)
+                .removeValue()
+        }
+        webRTCManager.release()
+    }
+
+    fun switchCamera() {
+        webRTCManager.switchCamera()
+    }
+
+    fun startRecording(context: Context, audioOnly: Boolean = false) {
+        if (_isRecording.value == true) return
+
+        if (androidx.core.content.ContextCompat.checkSelfPermission(
+                context,
+                android.Manifest.permission.RECORD_AUDIO
+            ) != android.content.pm.PackageManager.PERMISSION_GRANTED
+        ) {
+            Log.e(tag, "RECORD_AUDIO permission not granted")
+            return
+        }
+
+        val outputDir = getDownloadDirectory()
+        try {
+            val rm = RecorderManager(webRTCManager)
+            rm.startRecording(outputDir, audioOnly)
+            recorderManager = rm
+            _isRecording.postValue(true)
+            Log.d(tag, "Recording started to: $outputDir")
+        } catch (e: Exception) {
+            Log.e(tag, "startRecording error: ${e.message}")
+            recorderManager = null
+            _isRecording.postValue(false)
+        }
+    }
+
+    fun stopRecording(): String? {
+        val rm = recorderManager ?: return null
+        recorderManager = null
+        _isRecording.postValue(false)
+        var path: String? = null
+        try {
+            path = rm.stopRecording()
+            Log.d(tag, "Recording stopped, saved to: $path")
+        } catch (e: Exception) {
+            Log.e(tag, "stopRecording error: ${e.message}")
+        }
+        return path
+    }
+
+    private fun getDownloadDirectory(): File {
+        val app = getApplication<Application>()
+        if (isAudio) {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                val sm = app.getSystemService(Context.STORAGE_SERVICE) as StorageManager
+                val volumes = sm.storageVolumes
+                if (volumes.isNotEmpty()) {
+                    // Using reflection as getDirectory() might be hidden in some SDK versions
+                    try {
+                        val getDirMethod = volumes[0].javaClass.getMethod("getDirectory")
+                        val dir = getDirMethod.invoke(volumes[0]) as? File
+                        if (dir != null) return File(dir, "Download/Sentinel Video/Audio")
+                    } catch (e: Exception) {
+                        Log.e(tag, "StorageVolume.getDirectory failed: ${e.message}")
+                    }
+                }
+            }
+            return File(
+                Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS),
+                "Sentinel Video/Audio"
+            )
+        } else {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                val sm = app.getSystemService(Context.STORAGE_SERVICE) as StorageManager
+                val volumes = sm.storageVolumes
+                if (volumes.isNotEmpty()) {
+                    try {
+                        val getDirMethod = volumes[0].javaClass.getMethod("getDirectory")
+                        val dir = getDirMethod.invoke(volumes[0]) as? File
+                        if (dir != null) return File(dir, "Download/Sentinel Video")
+                    } catch (e: Exception) {
+                        Log.e(tag, "StorageVolume.getDirectory failed: ${e.message}")
+                    }
+                }
+            }
+            return File(
+                Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS),
+                "Sentinel Video"
+            )
+        }
+    }
+
+    fun stopAll() {
+        val sid = sessionId.value
+        val did = ViewerDeviceId.value
+        if (sid != null && did != null) {
+            FirebaseDatabase.getInstance().getReference("SaveSessions")
+                .child(did)
+                .child(sid)
+                .removeValue()
+        }
+        stopViewing()
+        stopStreaming()
+
+        sessionId.postValue("")
+        _sessionSeconds.postValue(0)
+    }
+
+    fun setMicrophoneEnabled(enabled: Boolean) {
+        webRTCManager.setMicrophoneEnabled(enabled)
+    }
+
+    fun declineRemoteSession(sessionId: String, broadcasterDeviceId: String? = null) {
+        if (sessionId.isEmpty()) return
+        val database = FirebaseDatabase.getInstance()
+        database.getReference("sessions").child(sessionId).child("status").setValue("declined")
+        
+        // Remove from SaveSessions if we know which device it belongs to
+        if (broadcasterDeviceId != null) {
+            database.getReference("SaveSessions").child(broadcasterDeviceId).child(sessionId).removeValue()
+        }
+
+        // Reset status after a short delay so it doesn't stay declined forever
+        Handler(Looper.getMainLooper()).postDelayed({
+            database.getReference("sessions").child(sessionId).child("status").removeValue()
+        }, 2000)
+    }
+
+    override fun onCleared() {
+        super.onCleared()
+        stopAll()
+    }
+}
