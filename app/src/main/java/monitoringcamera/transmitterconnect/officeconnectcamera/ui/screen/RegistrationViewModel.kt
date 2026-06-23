@@ -23,6 +23,7 @@ class RegistrationViewModel : ViewModel() {
     var mobileResendCooldown by mutableIntStateOf(0)
     
     var verificationSent by mutableStateOf(false)
+    var isGoogleLogin by mutableStateOf(false)
 
     fun reset() {
         email = ""
@@ -36,5 +37,6 @@ class RegistrationViewModel : ViewModel() {
         resendCooldown = 0
         mobileResendCooldown = 0
         verificationSent = false
+        isGoogleLogin = false
     }
 }

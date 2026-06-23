@@ -88,6 +88,7 @@ import monitoringcamera.transmitterconnect.officeconnectcamera.ui.screen.Registr
 import monitoringcamera.transmitterconnect.officeconnectcamera.ui.screen.RegistrationStep2Screen
 import monitoringcamera.transmitterconnect.officeconnectcamera.ui.screen.RegistrationStep3Screen
 import monitoringcamera.transmitterconnect.officeconnectcamera.ui.screen.RegistrationStep4Screen
+import monitoringcamera.transmitterconnect.officeconnectcamera.ui.screen.RegistrationStep5Screen
 import monitoringcamera.transmitterconnect.officeconnectcamera.ui.screen.RegistrationViewModel
 import monitoringcamera.transmitterconnect.officeconnectcamera.ui.screen.IntroPagerScreen
 import monitoringcamera.transmitterconnect.officeconnectcamera.ui.screen.LoginScreen
@@ -234,11 +235,22 @@ fun AppNavigation() {
             RegistrationStep4Screen(
                 viewModel = registrationViewModel,
                 onSuccess = {
-                    navController.navigate("main") {
-                        popUpTo(0) { inclusive = true }
+                    navController.navigate("registration_step5") {
+                        popUpTo("registration_step1") { inclusive = true }
                     }
                 },
                 onBack = { navController.popBackStack() }
+            )
+        }
+        detailScreen("registration_step5") { _ ->
+            RegistrationStep5Screen(
+                viewModel = registrationViewModel,
+                onTimeout = {
+                    val nextDest = if (registrationViewModel.isGoogleLogin) "main" else "login"
+                    navController.navigate(nextDest) {
+                        popUpTo(0) { inclusive = true }
+                    }
+                }
             )
         }
         detailScreen("login") { _ ->
@@ -271,7 +283,8 @@ fun AppNavigation() {
                         popUpTo(0) { inclusive = true }
                     }
                 },
-                authViewModel = authViewModel
+                authViewModel = authViewModel,
+                registrationViewModel = registrationViewModel
             )
         }
         detailScreen(

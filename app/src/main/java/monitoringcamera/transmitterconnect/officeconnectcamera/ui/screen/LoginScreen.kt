@@ -90,9 +90,11 @@ fun LoginScreen(
                                         isLoading = false
                                         if (document.exists() && !document.getString("username").isNullOrBlank()) {
                                             // User already complete, go to Main
+                                            viewModel.isGoogleLogin = true
                                             onNavigateToStep4()
                                         } else {
                                             // New user or incomplete, proceed to Step 4
+                                            viewModel.isGoogleLogin = true
                                             viewModel.fullName = user.displayName ?: ""
                                             viewModel.email = user.email ?: ""
                                             onNavigateToStep4()
@@ -101,6 +103,7 @@ fun LoginScreen(
                                     .addOnFailureListener {
                                         isLoading = false
                                         // Fallback: proceed to Step 4 with basic info
+                                        viewModel.isGoogleLogin = true
                                         viewModel.fullName = user.displayName ?: ""
                                         viewModel.email = user.email ?: ""
                                         onNavigateToStep4()

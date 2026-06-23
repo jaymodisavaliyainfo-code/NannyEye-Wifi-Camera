@@ -62,6 +62,7 @@ import androidx.compose.material.icons.filled.Podcasts
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.filled.Shield
 import androidx.compose.material.icons.filled.Smartphone
 import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material.icons.filled.Videocam
@@ -74,6 +75,7 @@ import androidx.compose.material.icons.outlined.Language
 import androidx.compose.material.icons.outlined.Notifications
 import androidx.compose.material.icons.outlined.PrivacyTip
 import androidx.compose.material.icons.outlined.Security
+import androidx.compose.material.icons.outlined.Shield
 import androidx.compose.material.icons.outlined.Storage
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
@@ -151,6 +153,39 @@ import java.io.File
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+import androidx.camera.core.CameraControl
+import androidx.camera.core.CameraSelector
+import androidx.camera.core.ImageAnalysis
+import androidx.camera.core.Preview
+import androidx.camera.lifecycle.ProcessCameraProvider
+import androidx.camera.view.PreviewView
+import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.tween
+import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.material.icons.filled.FlashOff
+import androidx.compose.material.icons.filled.FlashOn
+import androidx.compose.material.icons.filled.Keyboard
+import androidx.compose.material.icons.filled.Router
+import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.platform.LocalLifecycleOwner
+import androidx.compose.ui.viewinterop.AndroidView
+import com.google.mlkit.vision.barcode.BarcodeScannerOptions
+import com.google.mlkit.vision.barcode.BarcodeScanning
+import com.google.mlkit.vision.barcode.common.Barcode
+import com.google.mlkit.vision.common.InputImage
+import java.util.concurrent.Executors
+import org.json.JSONObject
+import org.webrtc.SurfaceViewRenderer
+import org.webrtc.VideoSink
+import android.view.ViewGroup
+import android.widget.FrameLayout
+import androidx.compose.ui.graphics.drawscope.Fill
 
 @Composable
 fun MainScreen(
@@ -189,7 +224,7 @@ fun MainScreen(
             state = pagerState, modifier = Modifier.padding(innerPadding), userScrollEnabled = true
         ) { page ->
             when (page) {
-                0 -> DashboardContent(navController, viewModel)
+                0 -> DashboardContent(navController, viewModel, authViewModel, linkedDevicesViewModel)
                 1 -> RecordsContent(navController)
                 2 -> DevicesContent(navController, viewModel)
                 3 -> SettingsContent(navController, authViewModel)
@@ -199,67 +234,62 @@ fun MainScreen(
 }
 
 @Composable
-fun DashboardContent(navController: NavController, viewModel: CameraViewModel) {
+fun DashboardContent(
+    navController: NavController,
+    viewModel: CameraViewModel,
+    authViewModel: AuthViewModel,
+    linkedDevicesViewModel: LinkedDevicesViewModel
+) {
     val density = LocalDensity.current
     val configuration = LocalConfiguration.current
     val screenWidthDp = configuration.screenWidthDp.dp
     val isTablet = configuration.screenWidthDp >= 600
-    val cardBackground = Color(0xFF1B1F26)
-    val primaryGradient =
-        Brush.horizontalGradient(colors = listOf(Color(0xFFBBC6E2), Color(0xFF1B263B)))
-    val textGrey = Color(0xFF9CA3AF)
+    val context = LocalContext.current
+    val activity = context as Activity
+    val coroutineScope = rememberCoroutineScope()
+
+    val user by authViewModel.user.collectAsState()
+    val fullName = remember(user) {
+        val prefs = context.getSharedPreferences("app_prefs", Context.MODE_PRIVATE)
+        prefs.getString("full_name", user?.displayName ?: "User") ?: "User"
+    }
 
     val activeSessions = remember { mutableStateListOf<String>() }
     val savedDevices by viewModel.savedDevices.observeAsState(emptyList())
-    val roomDevices by viewModel.roomDevices.observeAsState(emptyList())
-    val mySessionId by viewModel.sessionId.observeAsState("")
-    val isCreator by viewModel.isCreator.observeAsState(false)
-    val connectedViewers by viewModel.connectedViewers.observeAsState(emptyList())
-    val myCreatedSessions by viewModel.myCreatedSessions.observeAsState(emptyList())
+    val videoRecords by viewModel.videoRecords.observeAsState(emptyList())
     val onlineMonitors by viewModel.onlineMonitors.observeAsState(emptyMap())
     val myDeviceId by viewModel.myDeviceId.observeAsState("")
-
-    var selectedSessionIdForViewers by remember { mutableStateOf<String?>(null) }
-    var expandedSessionId by remember { mutableStateOf<String?>(null) }
-    var expandedDeviceId by remember { mutableStateOf<String?>(null) }
-    var expandedIPDeviceId by remember { mutableStateOf<String?>(null) }
-    var showBusyDialog by remember { mutableStateOf(false) }
-    var showConnectDialog by remember { mutableStateOf(false) }
-    var selectedSessionIdForConnection by remember { mutableStateOf<String?>(null) }
-
     val isConnected by viewModel.isConnected.observeAsState(false)
+    val isRemoteConnected by viewModel.isRemoteConnected.observeAsState(false)
+    val sessionId by viewModel.sessionId.observeAsState("")
+    val qrBitmap by viewModel.qrBitmap.observeAsState()
 
-    val context = LocalContext.current
-    val activity = context as Activity
+    var activePreviewSessionId by remember { mutableStateOf<String?>(null) }
+    var activePreviewDeviceName by remember { mutableStateOf("") }
 
-    LaunchedEffect(selectedSessionIdForViewers) {
-        selectedSessionIdForViewers?.let { viewModel.listenForViewers(it) }
+    var showQrDialog by remember { mutableStateOf(false) }
+    var showAddCameraDialog by remember { mutableStateOf(false) }
+    var showManualPairingDialog by remember { mutableStateOf(false) }
+    var showIPCameraSetupDialog by remember { mutableStateOf(false) }
+
+    // Close QR dialog automatically when connected
+    LaunchedEffect(isConnected) {
+        if (isConnected && showQrDialog) {
+            showQrDialog = false
+        }
     }
 
-    // Automated trigger for both Roles: Listen for connection requests from others
-    LaunchedEffect(myDeviceId, isConnected) {
-        if (myDeviceId.isNotEmpty() && !isConnected) {
-            val database = FirebaseDatabase.getInstance()
-            val requestRef = database.getReference("SaveSessions").child(myDeviceId)
-            requestRef.addValueEventListener(object : ValueEventListener {
-                override fun onDataChange(snapshot: DataSnapshot) {
-                    if (snapshot.exists()) {
-                        // A peer has initiated a connection request to this device ID
-                        val sessionId = snapshot.children.firstOrNull()?.key
-                        val isSessionAvailable = myCreatedSessions.any { it.sessionId == sessionId }
+    // Start streaming when QR dialog is shown
+    LaunchedEffect(showQrDialog) {
+        if (showQrDialog) {
+            viewModel.startStreaming(null, false)
+        }
+    }
 
-                        if (isSessionAvailable) {
-                            if (sessionId != null && !showConnectDialog && !isConnected) {
-                                selectedSessionIdForConnection = sessionId
-                                showConnectDialog = true
-                            }
-                        }
-
-                    }
-                }
-
-                override fun onCancelled(error: DatabaseError) {}
-            })
+    // Close QR scanner dialog automatically when remote camera connected
+    LaunchedEffect(isRemoteConnected) {
+        if (isRemoteConnected && showAddCameraDialog) {
+            showAddCameraDialog = false
         }
     }
 
@@ -281,423 +311,1075 @@ fun DashboardContent(navController: NavController, viewModel: CameraViewModel) {
 
             override fun onCancelled(error: DatabaseError) {}
         })
+        viewModel.refreshVideoRecords()
     }
 
-    Box(modifier = Modifier.fillMaxSize()) {
-
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(horizontal = dimensionResource(id = R.dimen.screen_padding)),
-            horizontalAlignment = Alignment.CenterHorizontally
-        ) {
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(vertical = dimensionResource(id = R.dimen.spacer_medium)),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Text(
-                    text = stringResource(id = R.string.app_name),
-                    color = Color.White,
-                    fontSize = with(density) { dimensionResource(id = R.dimen.text_small).toSp() },
-                    fontWeight = FontWeight.Bold,
-                    letterSpacing = with(density) { dimensionResource(id = R.dimen.letter_spacing_tight).toSp() })
-            }
-
-            Column(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .verticalScroll(rememberScrollState()),
-                horizontalAlignment = Alignment.CenterHorizontally
-            ) {
-                // Display current device's session only if it's the creator device
-                if (isCreator) {
-                    if (myCreatedSessions.isNotEmpty()) {
-                        Text(
-                            text = stringResource(id = R.string.recent_sessions),
-                            color = textGrey,
-                            fontSize = with(density) { dimensionResource(id = R.dimen.text_caption).toSp() },
-                            fontWeight = FontWeight.Bold,
-                            modifier = Modifier.fillMaxWidth()
-                        )
-                        myCreatedSessions.forEach { session ->
-                            val isLive = activeSessions.contains(session.sessionId)
-                            val isExpanded = expandedSessionId == session.sessionId
-                            RecentSessionItem(
-                                session = session,
-                                isLive = isLive,
-                                isExpanded = isExpanded,
-                                onExpandToggle = {
-                                    expandedSessionId = if (isExpanded) null else session.sessionId
-                                    expandedDeviceId = null
-                                    expandedIPDeviceId = null
-                                    viewModel.sessionId.value = session.sessionId
-                                },
-                                onConnectLive = {
-                                    selectedSessionIdForConnection = session.sessionId
-                                    showConnectDialog = true
-                                    Log.e("check8951", "showConnectDialog2")
-                                },
-                                navController = navController,
-                                viewModel = viewModel,
-                                onRemove = { viewModel.deleteSessionRecord(session.sessionId) })
-                        }
-                        Spacer(modifier = Modifier.height(dimensionResource(id = R.dimen.spacer_medium)))
-                    }
-                }
-
-                // Placeholder Area - Show when no devices are paired and no sessions are active
-                if (myCreatedSessions.isEmpty() && savedDevices.isEmpty() && roomDevices.isEmpty()) {
-                    Image(
-                        painter = painterResource(id = R.drawable.empty_state),
-                        contentDescription = null,
-                        modifier = Modifier
-                            .fillMaxWidth(0.85f)
-                            .height(
-                                if (isTablet) screenWidthDp * 0.4f
-                                else screenWidthDp * 0.75f
-                            )
-                            .widthIn(max = 500.dp),
-                        contentScale = ContentScale.Fit
-                    )
-
-                    Spacer(modifier = Modifier.height(dimensionResource(id = R.dimen.section_spacing)))
-
-                    Text(
-                        text = stringResource(id = R.string.no_cameras_added),
-                        color = Color.White,
-                        fontSize = with(density) { dimensionResource(id = R.dimen.text_h2).toSp() },
-                        fontWeight = FontWeight.Bold,
-                        textAlign = TextAlign.Center
-                    )
-
-                    Spacer(modifier = Modifier.height(dimensionResource(id = R.dimen.spacer_medium)))
-
-                    Text(
-                        text = stringResource(id = R.string.no_cameras_description),
-                        color = textGrey,
-                        fontSize = with(density) { dimensionResource(id = R.dimen.text_small).toSp() },
-                        lineHeight = with(density) { dimensionResource(id = R.dimen.text_title).toSp() },
-                        textAlign = TextAlign.Center
-                    )
-                }
-
-                if (savedDevices.isNotEmpty() || roomDevices.isNotEmpty()) {
-                    // Group by deviceId and keep the most recent session for each device
-                    // This prevents duplicate entries and ensures correct ID matching.
-                    val latestSavedDevices = savedDevices.groupBy { it.deviceId }
-                        .map { entry -> entry.value.maxByOrNull { it.timestamp }!! }
-                        .sortedByDescending { it.timestamp }
-
-                    val otherSavedDevices = latestSavedDevices.filter { device ->
-                        if (device.role == "monitor") {
-                            !myCreatedSessions.any { it.sessionId == device.sessionId }
-                        } else {
-                            device.sessionId != mySessionId
-                        }
-                    }
-                    if (otherSavedDevices.isNotEmpty() || roomDevices.isNotEmpty()) {
-                        Text(
-                            text = stringResource(id = R.string.connected_cameras),
-                            color = textGrey,
-                            fontSize = with(density) { dimensionResource(id = R.dimen.text_caption).toSp() },
-                            fontWeight = FontWeight.Bold,
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(vertical = dimensionResource(id = R.dimen.spacer_small))
-                        )
-                        otherSavedDevices.forEach { device ->
-                            val onlineInfo = onlineMonitors[device.deviceId]
-                            // Strict matching: Only show as "Online" if the current active session on the device
-                            // matches the specific 10-digit pairing code (sessionId) we have saved.
-                            val isLive =
-                                onlineInfo != null && onlineInfo.sessionId == device.sessionId
-
-                            val isExpanded = expandedDeviceId == device.deviceId
-
-                            StreamItem(
-                                sessionId = device.sessionId,
-                                deviceId = device.deviceId,
-                                name = device.name,
-                                isActive = isLive,
-                                isExpanded = isExpanded,
-                                onExpandToggle = {
-                                    expandedDeviceId = if (isExpanded) null else device.deviceId
-                                    expandedSessionId = null
-                                    expandedIPDeviceId = null
-                                },
-                                isOccupied = if (isLive) onlineInfo.isOccupied else false,
-                                navController = navController,
-                                role = device.role,
-                                cameraViewModel = viewModel,
-                                onRemove = { viewModel.deleteSavedDevice(device.deviceId) })
-                        }
-
-                        roomDevices.forEach { device ->
-                            val isExpanded = expandedIPDeviceId == device.id
-                            IPCameraStreamItem(
-                                device = device,
-                                isExpanded = isExpanded,
-                                onExpandToggle = {
-                                    expandedIPDeviceId = if (isExpanded) null else device.id
-                                    expandedSessionId = null
-                                    expandedDeviceId = null
-                                },
-                                navController = navController,
-                                onRemove = { viewModel.deleteRoomDevice(device) })
-                        }
-                    }
-                }
-
-                Spacer(
-                    modifier = Modifier.height(
-                        dimensionResource(id = R.dimen.section_spacing).times(
-                            3
-                        )
-                    )
-                )
-            }
-        }
-
-        Box(
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .verticalScroll(rememberScrollState())
+            .padding(16.dp)
+    ) {
+        // 1. Header
+        Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .align(Alignment.BottomCenter)
-                .background(
-                    Brush.verticalGradient(
-                        colors = listOf(
-                            Color.Transparent,
-                            Color(0xFF0E1116).copy(alpha = 0.9f),
-                            Color(0xFF0E1116)
-                        ), startY = 0f, endY = 100f
-                    )
-                )
-                .padding(bottom = dimensionResource(id = R.dimen.spacer_medium)),
-            contentAlignment = Alignment.Center
+                .padding(vertical = 16.dp),
+            verticalAlignment = Alignment.CenterVertically
         ) {
-            Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth(if (isTablet) 0.35f else 0.55f)
-                        .widthIn(max = 300.dp)
-                        .height(dimensionResource(id = R.dimen.button_height))
-                        .shadow(
-                            elevation = dimensionResource(id = R.dimen.elevation_large),
-                            shape = RoundedCornerShape(dimensionResource(id = R.dimen.radius_medium)),
-                            ambientColor = Color(0xFF77AEFF).copy(alpha = 0.5f),
-                            spotColor = Color(0xFF77AEFF).copy(alpha = 0.5f)
-                        )
-                        .clip(RoundedCornerShape(dimensionResource(id = R.dimen.radius_medium)))
-                        .background(primaryGradient)
-                        .clickable {
-                            navController.navigate("add_device")
-                            /*if (AdsDataHolder.adsData != null) {
-                                FacebookAds.getInstance(activity).ShowInterstitial(
-                                    activity,
-                                    AdsDataHolder.adsData.checkAdPrivacyPolicyInter,
-                                    AdsDataHolder.adsData.fbinter1,
-                                    AdsDataHolder.adsData.qurekaInterImgUrl1,
-                                    object : MyCallback {
-                                        override fun onCall() {
-                                            navController.navigate("add_device")
-                                        }
-                                    })
-                            } else {
-                                navController.navigate("add_device")
-                            }*/
-                        }, contentAlignment = Alignment.Center
+            Surface(
+                modifier = Modifier.size(48.dp),
+                shape = RoundedCornerShape(12.dp),
+                color = Color(0xFF1C222B)
+            ) {
+                Icon(
+                    Icons.Default.Person,
+                    contentDescription = null,
+                    tint = Color.White.copy(alpha = 0.6f),
+                    modifier = Modifier.padding(8.dp)
+                )
+            }
+            Spacer(modifier = Modifier.width(12.dp))
+            Column {
+                Text(
+                    text = "Good afternoon, $fullName",
+                    color = Color.White,
+                    fontSize = 18.sp,
+                    fontWeight = FontWeight.Bold
+                )
+                Text(
+                    text = "@$fullName • SURVEILLANCE HUB".uppercase(),
+                    color = Color(0xFF9CA3AF),
+                    fontSize = 10.sp,
+                    fontWeight = FontWeight.Bold,
+                    letterSpacing = 1.sp
+                )
+            }
+        }
+
+        // 2. Stats Row
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(16.dp)
+        ) {
+            val onlineCount = savedDevices.count { device ->
+                val onlineInfo = onlineMonitors[device.deviceId]
+                onlineInfo != null && onlineInfo.sessionId == device.sessionId
+            }
+            StatCard(
+                title = "CAMERAS\nONLINE",
+                count = onlineCount.toString(),
+                subtitle = if (onlineCount == 0) "No streams active" else "$onlineCount active",
+                icon = Icons.Default.Videocam,
+                modifier = Modifier.weight(1f)
+            )
+            StatCard(
+                title = "ALERTS\nTODAY",
+                count = "0",
+                subtitle = "Motion events",
+                icon = Icons.Outlined.Notifications,
+                iconColor = Color(0xFFFF8A65),
+                modifier = Modifier.weight(1f)
+            )
+        }
+
+        Spacer(modifier = Modifier.height(16.dp))
+
+        // 3. Captures Card
+        Card(
+            modifier = Modifier.fillMaxWidth(),
+            shape = RoundedCornerShape(16.dp),
+            colors = CardDefaults.cardColors(containerColor = Color(0xFF161B22))
+        ) {
+            Row(
+                modifier = Modifier.padding(16.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Surface(
+                    modifier = Modifier.size(40.dp),
+                    shape = RoundedCornerShape(8.dp),
+                    color = Color(0xFF1B232D)
                 ) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Icon(
-                            Icons.Default.Add,
-                            null,
-                            tint = Color.Black,
-                            modifier = Modifier.size(dimensionResource(id = R.dimen.icon_size_standard))
-                        )
-                        Spacer(modifier = Modifier.width(dimensionResource(id = R.dimen.spacer_small)))
+                    Icon(
+                        ImageVector.vectorResource(id = R.drawable.folder),
+                        contentDescription = null,
+                        tint = Color.White.copy(alpha = 0.6f),
+                        modifier = Modifier.padding(10.dp)
+                    )
+                }
+                Spacer(modifier = Modifier.width(16.dp))
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = "TOTAL CAPTURES",
+                        color = Color(0xFF9CA3AF),
+                        fontSize = 10.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                    Text(
+                        text = "${videoRecords.size} Clips & snaps",
+                        color = Color.White,
+                        fontSize = 16.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                }
+                Button(
+                    onClick = { /* Navigate to Records */ },
+                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF1B232D)),
+                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp),
+                    modifier = Modifier.height(32.dp),
+                    shape = RoundedCornerShape(8.dp)
+                ) {
+                    Text("MANAGE", fontSize = 10.sp, color = Color.White, fontWeight = FontWeight.Bold)
+                }
+            }
+        }
+
+        Spacer(modifier = Modifier.height(32.dp))
+
+        // 4. Live View Section
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.Bottom
+        ) {
+            Column {
+                Text(
+                    text = "Live view",
+                    color = Color.White,
+                    fontSize = 20.sp,
+                    fontWeight = FontWeight.Bold
+                )
+                Text(
+                    text = "Your cameras & this device",
+                    color = Color(0xFF9CA3AF),
+                    fontSize = 12.sp
+                )
+            }
+            Surface(
+                color = Color(0xFF161B22),
+                shape = RoundedCornerShape(8.dp),
+                modifier = Modifier.clickable { /* Monitor Wall */ }
+            ) {
+                Row(
+                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Icon(
+                        Icons.Default.Adjust,
+                        contentDescription = null,
+                        tint = Color.White.copy(alpha = 0.6f),
+                        modifier = Modifier.size(14.dp)
+                    )
+                    Spacer(modifier = Modifier.width(4.dp))
+                    Text(
+                        "MONITOR WALL",
+                        color = Color.White.copy(alpha = 0.6f),
+                        fontSize = 10.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                }
+            }
+        }
+
+        Spacer(modifier = Modifier.height(16.dp))
+
+        LazyRow(
+            horizontalArrangement = Arrangement.spacedBy(16.dp),
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            item {
+                val isBroadcasting = sessionId.isNotEmpty()
+                ThisDeviceCard(
+                    isBroadcasting = isBroadcasting,
+                    isConnected = isConnected,
+                    sessionId = sessionId,
+                    viewModel = viewModel,
+                    onStartCamera = {
+                        viewModel.generateHostSession()
+                        showQrDialog = true
+                    }
+                )
+            }
+            activePreviewSessionId?.let { sid ->
+                item {
+                    RemoteDeviceCard(
+                        sessionId = sid,
+                        deviceName = activePreviewDeviceName,
+                        viewModel = viewModel,
+                        onClose = { activePreviewSessionId = null },
+                        onClick = { navController.navigate("viewer/${Uri.encode(sid)}") }
+                    )
+                }
+            }
+            item {
+                AddCameraCard(
+                    onClick = { showAddCameraDialog = true }
+                )
+            }
+        }
+
+        Spacer(modifier = Modifier.height(32.dp))
+
+        // 5. Recently Joined
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(
+                text = "Recently joined",
+                color = Color.White,
+                fontSize = 18.sp,
+                fontWeight = FontWeight.Bold
+            )
+            Icon(
+                Icons.Default.Add,
+                contentDescription = null,
+                tint = Color.White.copy(alpha = 0.6f),
+                modifier = Modifier.size(20.dp).clickable { navController.navigate("add_device") }
+            )
+        }
+
+        Spacer(modifier = Modifier.height(16.dp))
+
+        savedDevices.take(3).forEach { device ->
+            val isLive = onlineMonitors[device.deviceId]?.sessionId == device.sessionId
+            DeviceRowItem(
+                name = device.name,
+                status = if (isLive) "ONLINE" else "OFFLINE",
+                onActivate = {
+                    if (isLive) {
+                        navController.navigate("viewer/${Uri.encode(device.sessionId)}")
+                    } else {
+                        // Handle offline device connection request
+                    }
+                }
+            )
+            Spacer(modifier = Modifier.height(12.dp))
+        }
+
+        Spacer(modifier = Modifier.height(32.dp))
+
+        // 6. Recent Activity
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(
+                text = "Recent activity",
+                color = Color.White,
+                fontSize = 18.sp,
+                fontWeight = FontWeight.Bold
+            )
+            Text(
+                text = "VIEW ALL",
+                color = Color(0xFF9CA3AF),
+                fontSize = 10.sp,
+                fontWeight = FontWeight.Bold,
+                modifier = Modifier.clickable { /* All Activity */ }
+            )
+        }
+
+        Spacer(modifier = Modifier.height(16.dp))
+
+        ActivityItem(title = "Camera stopped", subtitle = "This device", time = "16:47", icon = Icons.Default.VideocamOff)
+        ActivityItem(title = "Monitor connected", subtitle = "samsung SM-S928B", time = "12:48", icon = Icons.Default.Person)
+        ActivityItem(title = "Camera started", subtitle = "This device", time = "12:44", icon = Icons.Default.Videocam)
+
+        Spacer(modifier = Modifier.height(32.dp))
+
+        // 7. Upgrade Card
+        UpgradeToMaxCard()
+
+        Spacer(modifier = Modifier.height(80.dp))
+    }
+
+    if (showAddCameraDialog) {
+        AddCameraDialog(
+            onDismiss = { showAddCameraDialog = false },
+            onManualCode = {
+                showAddCameraDialog = false
+                showManualPairingDialog = true
+            },
+            onConnectIPCamera = {
+                showAddCameraDialog = false
+                showIPCameraSetupDialog = true
+            },
+            onScanSuccess = { sessionId: String ->
+                activePreviewSessionId = sessionId
+                activePreviewDeviceName = "Remote Camera"
+                viewModel.fetchAndSaveDeviceMetadata(sessionId)
+            }
+        )
+    }
+
+    if (showManualPairingDialog) {
+        ManualPairingDialog(
+            onDismiss = { showManualPairingDialog = false },
+            onConnect = { sessionId: String ->
+                showManualPairingDialog = false
+                navController.navigate("viewer/${Uri.encode(sessionId)}")
+            }
+        )
+    }
+
+    if (showIPCameraSetupDialog) {
+        IPCameraSetupDialog(
+            onDismiss = { showIPCameraSetupDialog = false },
+            onNavigateToPlayerScreen = { ip, port, user, pass, path, name ->
+                showIPCameraSetupDialog = false
+                val encodedPath = path.replace("/", "|")
+                navController.navigate("player/${Uri.encode(ip)}/$port/${Uri.encode(user)}/${Uri.encode(pass)}/${Uri.encode(encodedPath)}/${Uri.encode(name)}")
+            },
+            onNavigateToMultiChannel = { ip, port, user, pass, channels, main, brand ->
+                showIPCameraSetupDialog = false
+                navController.navigate("multi_channel/${Uri.encode(ip)}/$port/${Uri.encode(user)}/${Uri.encode(pass)}/$channels/$main/$brand")
+            }
+        )
+    }
+
+    if (showQrDialog && qrBitmap != null) {
+        Dialog(onDismissRequest = { showQrDialog = false }) {
+            Card(
+                shape = RoundedCornerShape(32.dp),
+                colors = CardDefaults.cardColors(containerColor = Color(0xFF161B22)),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(16.dp)
+            ) {
+                Column(
+                    modifier = Modifier.padding(24.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally
+                ) {
+                    Text(
+                        "Share this camera",
+                        color = Color.White,
+                        fontSize = 22.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                    Spacer(modifier = Modifier.height(16.dp))
+                    Text(
+                        text = "Watch this phone's camera from\nanother phone/browser: in the",
+                        color = Color(0xFF9CA3AF),
+                        fontSize = 13.sp,
+                        textAlign = TextAlign.Center,
+                        lineHeight = 18.sp
+                    )
+                    Row {
                         Text(
-                            stringResource(id = R.string.add_camera),
-                            color = Color.Black,
+                            "NannyEye app/web",
+                            color = Color(0xFFBBC6E2),
+                            fontSize = 13.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                        Text(
+                            ", add a device and",
+                            color = Color(0xFF9CA3AF),
+                            fontSize = 13.sp
+                        )
+                    }
+                    Row {
+                        Text(
+                            "scan this code — or type it in.",
+                            color = Color(0xFFBBC6E2),
+                            fontSize = 13.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
+                    Spacer(modifier = Modifier.height(12.dp))
+                    Text(
+                        "Devices already linked will appear in\nyour list automatically. You don't need\nto reconnect.",
+                        color = Color(0xFF9CA3AF),
+                        fontSize = 12.sp,
+                        textAlign = TextAlign.Center,
+                        lineHeight = 16.sp
+                    )
+
+                    Spacer(modifier = Modifier.height(32.dp))
+
+                    Surface(
+                        color = Color.White,
+                        shape = RoundedCornerShape(24.dp),
+                        modifier = Modifier.size(240.dp)
+                    ) {
+                        Image(
+                            bitmap = qrBitmap!!.asImageBitmap(),
+                            contentDescription = "QR Code",
+                            modifier = Modifier.padding(16.dp)
+                        )
+                    }
+
+                    Spacer(modifier = Modifier.height(24.dp))
+
+                    Text(
+                        text = viewModel.sessionId.value ?: "",
+                        color = Color(0xFF77AEFF),
+                        fontSize = 28.sp,
+                        fontWeight = FontWeight.Bold,
+                        letterSpacing = 2.sp,
+                        modifier = Modifier.shadow(
+                            elevation = 10.dp,
+                            spotColor = Color(0xFF77AEFF),
+                            ambientColor = Color(0xFF77AEFF)
+                        )
+                    )
+
+                    Spacer(modifier = Modifier.height(16.dp))
+
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Surface(
+                            modifier = Modifier.size(6.dp),
+                            shape = CircleShape,
+                            color = Color(0xFFFF8A65)
+                        ) {}
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(
+                            "BROADCASTING. SCAN FROM THE NANNYEYE\nAPP TO WATCH.",
+                            color = Color(0xFF9CA3AF),
+                            fontSize = 10.sp,
                             fontWeight = FontWeight.Bold,
-                            fontSize = with(density) { dimensionResource(id = R.dimen.text_body).toSp() })
+                            textAlign = TextAlign.Center,
+                            letterSpacing = 1.sp
+                        )
+                    }
+
+                    Spacer(modifier = Modifier.height(32.dp))
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        Button(
+                            onClick = { showQrDialog = false },
+                            modifier = Modifier
+                                .weight(1f)
+                                .height(56.dp),
+                            shape = RoundedCornerShape(16.dp),
+                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF1B232D))
+                        ) {
+                            Text("Cancel", fontWeight = FontWeight.Bold, color = Color.White)
+                        }
+                        Button(
+                            onClick = { viewModel.generateHostSession() },
+                            modifier = Modifier
+                                .weight(1f)
+                                .height(56.dp),
+                            shape = RoundedCornerShape(16.dp),
+                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF1B232D))
+                        ) {
+                            Text("New code", fontWeight = FontWeight.Bold, color = Color.White)
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun StatCard(
+    title: String,
+    count: String,
+    subtitle: String,
+    icon: ImageVector,
+    iconColor: Color = Color(0xFF77AEFF),
+    modifier: Modifier = Modifier
+) {
+    Card(
+        modifier = modifier.height(140.dp),
+        shape = RoundedCornerShape(24.dp),
+        colors = CardDefaults.cardColors(containerColor = Color(0xFF161B22))
+    ) {
+        Column(
+            modifier = Modifier.padding(16.dp).fillMaxSize(),
+            verticalArrangement = Arrangement.SpaceBetween
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.Top
+            ) {
+                Text(
+                    text = title,
+                    color = Color(0xFF9CA3AF),
+                    fontSize = 10.sp,
+                    fontWeight = FontWeight.Bold,
+                    lineHeight = 12.sp
+                )
+                Icon(
+                    imageVector = icon,
+                    contentDescription = null,
+                    tint = iconColor,
+                    modifier = Modifier.size(24.dp)
+                )
+            }
+            Column {
+                Text(
+                    text = count,
+                    color = Color.White,
+                    fontSize = 48.sp,
+                    fontWeight = FontWeight.Bold
+                )
+                Text(
+                    text = subtitle,
+                    color = Color(0xFF9CA3AF),
+                    fontSize = 10.sp
+                )
+            }
+        }
+    }
+}
+
+@Composable
+fun ThisDeviceCard(
+    isBroadcasting: Boolean,
+    isConnected: Boolean,
+    sessionId: String,
+    viewModel: CameraViewModel,
+    onStartCamera: () -> Unit
+) {
+    val density = LocalDensity.current
+    val cardWidth = 280.dp
+    val cardHeight = 300.dp
+
+    var currentTime by remember { mutableStateOf("") }
+    LaunchedEffect(isBroadcasting) {
+        if (isBroadcasting) {
+            while (true) {
+                currentTime = SimpleDateFormat("HH:mm:ss", Locale.getDefault()).format(Date())
+                kotlinx.coroutines.delay(1000)
+            }
+        }
+    }
+
+    Card(
+        modifier = Modifier.size(width = cardWidth, height = cardHeight),
+        shape = RoundedCornerShape(24.dp),
+        colors = CardDefaults.cardColors(containerColor = Color(0xFF161B22))
+    ) {
+        if (isBroadcasting && isConnected) {
+            Box(modifier = Modifier.fillMaxSize()) {
+                var localSink by remember { mutableStateOf<VideoSink?>(null) }
+
+                LaunchedEffect(localSink) {
+                    localSink?.let { sink ->
+                        viewModel.startStreaming(sink, false, sessionId)
                     }
                 }
 
-                Spacer(modifier = Modifier.height(dimensionResource(id = R.dimen.spacer_medium)))
+                // Live Camera Preview
+                AndroidView(
+                    factory = { ctx ->
+                        SurfaceViewRenderer(ctx).apply {
+                            layoutParams = ViewGroup.LayoutParams(
+                                ViewGroup.LayoutParams.MATCH_PARENT,
+                                ViewGroup.LayoutParams.MATCH_PARENT
+                            )
+                            viewModel.initRenderer(this)
+                            localSink = this
+                        }
+                    },
+                    modifier = Modifier.fillMaxSize()
+                )
 
-                Row(modifier = Modifier
-                    .clickable { navController.navigate("sentinel_guide") }
-                    .padding(dimensionResource(id = R.dimen.spacer_small)),
-                    verticalAlignment = Alignment.CenterVertically) {
-                    Icon(
-                        imageVector = Icons.AutoMirrored.Outlined.HelpOutline,
-                        contentDescription = null,
-                        tint = textGrey,
-                        modifier = Modifier.size(dimensionResource(id = R.dimen.icon_size_small))
-                    )
-                    Spacer(modifier = Modifier.width(dimensionResource(id = R.dimen.spacer_small)))
+                // Overlays
+                Box(modifier = Modifier.fillMaxSize().padding(8.dp)) {
+                    Row(
+                        modifier = Modifier.align(Alignment.TopStart),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        // 1. Live Indicator (Red if connected, Gray if just sharing)
+                        Row(
+                            modifier = Modifier
+                                .background(Color.Black.copy(alpha = 0.5f), RoundedCornerShape(12.dp))
+                                .padding(horizontal = 8.dp, vertical = 4.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Canvas(modifier = Modifier.size(6.dp)) {
+                                drawCircle(
+                                    color = Color.Red,
+                                    radius = size.minDimension / 2
+                                )
+                            }
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text(
+                                "LIVE",
+                                color = Color.White,
+                                fontSize = 10.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
+
+                        // 2. This Device Label
+                        Surface(
+                            color = Color.White.copy(alpha = 0.2f),
+                            shape = RoundedCornerShape(12.dp)
+                        ) {
+                            Text(
+                                "THIS DEVICE",
+                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                                color = Color.White,
+                                fontSize = 10.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
+
+                        // 3. Sharing Session ID Label
+                        Surface(
+                            color = Color(0xFF77AEFF).copy(alpha = 0.2f),
+                            shape = RoundedCornerShape(12.dp)
+                        ) {
+                            Text(
+                                text = sessionId,
+                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                                color = Color.White,
+                                fontSize = 10.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
+                    }
+
+                    // 4. Clock
                     Text(
-                        text = stringResource(id = R.string.need_help),
-                        color = textGrey,
-                        fontSize = with(density) { dimensionResource(id = R.dimen.text_micro).toSp() },
-                        fontWeight = FontWeight.Bold,
-                        letterSpacing = with(density) { dimensionResource(id = R.dimen.letter_spacing_tight).toSp() })
-                    Spacer(modifier = Modifier.width(dimensionResource(id = R.dimen.spacer_micro)))
+                        text = currentTime,
+                        modifier = Modifier
+                            .align(Alignment.TopEnd)
+                            .background(Color.Black.copy(alpha = 0.5f), RoundedCornerShape(8.dp))
+                            .padding(horizontal = 6.dp, vertical = 2.dp),
+                        color = Color.White,
+                        fontSize = 10.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+
+                    // 5. Stop Button (Small close icon in bottom right)
+                    IconButton(
+                        onClick = { viewModel.stopAll() },
+                        modifier = Modifier
+                            .align(Alignment.BottomEnd)
+                            .size(24.dp)
+                            .background(Color.Black.copy(alpha = 0.5f), CircleShape)
+                    ) {
+                        Icon(
+                            Icons.Default.Close,
+                            contentDescription = "Stop",
+                            tint = Color.White,
+                            modifier = Modifier.size(14.dp)
+                        )
+                    }
+                }
+            }
+        } else if (isBroadcasting && !isConnected) {
+            // "Waiting for connection" state
+            Column(
+                modifier = Modifier
+                    .padding(16.dp)
+                    .fillMaxSize(),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.Center
+            ) {
+                Surface(
+                    modifier = Modifier.size(48.dp),
+                    shape = RoundedCornerShape(12.dp),
+                    color = Color(0xFF1B232D)
+                ) {
+                    CircularProgressIndicator(
+                        modifier = Modifier.padding(12.dp),
+                        color = Color(0xFF77AEFF),
+                        strokeWidth = 2.dp
+                    )
+                }
+                Spacer(modifier = Modifier.height(16.dp))
+                Text(
+                    text = "Waiting...",
+                    color = Color.White,
+                    fontSize = 16.sp,
+                    fontWeight = FontWeight.Bold
+                )
+                Spacer(modifier = Modifier.height(4.dp))
+                Text(
+                    text = "Broadcasting session $sessionId. Scan the QR code on the monitor device to connect.",
+                    color = Color(0xFF9CA3AF),
+                    fontSize = 11.sp,
+                    textAlign = TextAlign.Center,
+                    lineHeight = 14.sp
+                )
+                Spacer(modifier = Modifier.height(16.dp))
+                Button(
+                    onClick = { viewModel.stopAll() },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(40.dp),
+                    shape = RoundedCornerShape(10.dp),
+                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF2D1619))
+                ) {
+                    Text("Stop Broadcasting", color = Color(0xFFFF8A80), fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                }
+            }
+        } else {
+            Column(
+                modifier = Modifier
+                    .padding(16.dp)
+                    .fillMaxSize(),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.Center
+            ) {
+                Surface(
+                    modifier = Modifier.size(48.dp),
+                    shape = RoundedCornerShape(12.dp),
+                    color = Color(0xFF1B232D)
+                ) {
                     Icon(
-                        imageVector = Icons.AutoMirrored.Filled.ArrowForward,
+                        ImageVector.vectorResource(id = R.drawable.round_img),
                         contentDescription = null,
-                        tint = textGrey,
-                        modifier = Modifier.size(dimensionResource(id = R.dimen.icon_size_tiny))
+                        tint = Color.White.copy(alpha = 0.6f),
+                        modifier = Modifier.padding(12.dp)
+                    )
+                }
+                Spacer(modifier = Modifier.height(16.dp))
+                Text(
+                    text = "This device",
+                    color = Color.White,
+                    fontSize = 16.sp,
+                    fontWeight = FontWeight.Bold
+                )
+                Spacer(modifier = Modifier.height(4.dp))
+                Text(
+                    text = "Use this phone as a camera — share it to another device.",
+                    color = Color(0xFF9CA3AF),
+                    fontSize = 11.sp,
+                    textAlign = TextAlign.Center,
+                    lineHeight = 14.sp
+                )
+                Spacer(modifier = Modifier.height(16.dp))
+                Button(
+                    onClick = onStartCamera,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(40.dp),
+                    shape = RoundedCornerShape(10.dp),
+                    colors = ButtonDefaults.buttonColors(containerColor = Color.Transparent),
+                    contentPadding = PaddingValues()
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .background(
+                                brush = Brush.horizontalGradient(
+                                    colors = listOf(Color(0xFFBBC6E2), Color(0xFF1B263B))
+                                )
+                            ),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(
+                                Icons.Default.Videocam,
+                                contentDescription = null,
+                                tint = Color.Black,
+                                modifier = Modifier.size(16.dp)
+                            )
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text("Start camera", color = Color.Black, fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun RemoteDeviceCard(
+    sessionId: String,
+    deviceName: String,
+    viewModel: CameraViewModel,
+    onClose: () -> Unit,
+    onClick: () -> Unit
+) {
+    val cardWidth = 280.dp
+    val cardHeight = 300.dp
+
+    Card(
+        modifier = Modifier
+            .size(width = cardWidth, height = cardHeight)
+            .clickable { onClick() },
+        shape = RoundedCornerShape(24.dp),
+        colors = CardDefaults.cardColors(containerColor = Color(0xFF161B22))
+    ) {
+        Box(modifier = Modifier.fillMaxSize()) {
+            var remoteSink by remember { mutableStateOf<VideoSink?>(null) }
+
+            LaunchedEffect(remoteSink) {
+                remoteSink?.let { sink ->
+                    viewModel.startRemotePreview(sessionId, sink)
+                }
+            }
+
+            DisposableEffect(Unit) {
+                onDispose {
+                    viewModel.stopRemotePreview()
+                }
+            }
+
+            // Remote Camera Preview
+            AndroidView(
+                factory = { ctx ->
+                    SurfaceViewRenderer(ctx).apply {
+                        layoutParams = ViewGroup.LayoutParams(
+                            ViewGroup.LayoutParams.MATCH_PARENT,
+                            ViewGroup.LayoutParams.MATCH_PARENT
+                        )
+                        viewModel.initRenderer(this, false)
+                        remoteSink = this
+                    }
+                },
+                modifier = Modifier.fillMaxSize()
+            )
+
+            // Overlays
+            Box(modifier = Modifier.fillMaxSize().padding(8.dp)) {
+                Row(
+                    modifier = Modifier.align(Alignment.TopStart),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    // 1. Live Indicator (Always live for active preview)
+                    Row(
+                        modifier = Modifier
+                            .background(Color.Black.copy(alpha = 0.5f), RoundedCornerShape(12.dp))
+                            .padding(horizontal = 8.dp, vertical = 4.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Canvas(modifier = Modifier.size(6.dp)) {
+                            drawCircle(color = Color.Green, radius = size.minDimension / 2)
+                        }
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text(
+                            "LIVE",
+                            color = Color.White,
+                            fontSize = 10.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
+
+                    // 2. Device Name Label
+                    Surface(
+                        color = Color.White.copy(alpha = 0.2f),
+                        shape = RoundedCornerShape(12.dp)
+                    ) {
+                        Text(
+                            deviceName.uppercase(),
+                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                            color = Color.White,
+                            fontSize = 10.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
+                }
+
+                // 3. Close Button
+                IconButton(
+                    onClick = onClose,
+                    modifier = Modifier
+                        .align(Alignment.BottomEnd)
+                        .size(24.dp)
+                        .background(Color.Black.copy(alpha = 0.5f), CircleShape)
+                ) {
+                    Icon(
+                        Icons.Default.Close,
+                        contentDescription = "Stop",
+                        tint = Color.White,
+                        modifier = Modifier.size(14.dp)
                     )
                 }
             }
         }
     }
+}
 
-    if (selectedSessionIdForViewers != null) {
-        AlertDialog(
-            onDismissRequest = { selectedSessionIdForViewers = null },
-            title = {
-                Text(
-                    stringResource(
-                        id = R.string.session_label, selectedSessionIdForViewers!!
-                    )
+@Composable
+fun AddCameraCard(onClick: () -> Unit) {
+    Card(
+        modifier = Modifier.size(width = 240.dp, height = 300.dp).clickable { onClick() },
+        shape = RoundedCornerShape(32.dp),
+        colors = CardDefaults.cardColors(containerColor = Color(0xFF0E1116)),
+        border = BorderStroke(1.dp, Color.White.copy(alpha = 0.05f))
+    ) {
+        Column(
+            modifier = Modifier.fillMaxSize(),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.Center
+        ) {
+            Surface(
+                modifier = Modifier.size(48.dp),
+                shape = CircleShape,
+                color = Color(0xFF161B22)
+            ) {
+                Icon(
+                    Icons.Default.Add,
+                    contentDescription = null,
+                    tint = Color.White.copy(alpha = 0.3f),
+                    modifier = Modifier.padding(12.dp)
                 )
-            },
-            text = {
-                Column(modifier = Modifier.verticalScroll(rememberScrollState())) {
-                    Text(
-                        stringResource(id = R.string.connected_devices),
-                        fontWeight = FontWeight.Bold,
-                        modifier = Modifier.padding(bottom = dimensionResource(id = R.dimen.spacer_small))
-                    )
-                    if (connectedViewers.isEmpty()) {
-                        Text(
-                            stringResource(id = R.string.no_devices_connected_label),
-                            color = textGrey,
-                            fontSize = with(density) { dimensionResource(id = R.dimen.text_small).toSp() })
-                    } else {
-                        connectedViewers.forEach { viewer ->
-                            Row(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .padding(vertical = dimensionResource(id = R.dimen.spacer_micro)),
-                                horizontalArrangement = Arrangement.SpaceBetween,
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Column(modifier = Modifier.weight(1f)) {
-                                    Text(
-                                        text = viewer.name,
-                                        color = Color.White,
-                                        fontSize = with(density) { dimensionResource(id = R.dimen.text_small).toSp() },
-                                        fontWeight = FontWeight.Bold
-                                    )
-                                    Text(
-                                        text = stringResource(
-                                            id = R.string.id_label, viewer.deviceId
-                                        ),
-                                        color = textGrey,
-                                        fontSize = with(density) { dimensionResource(id = R.dimen.text_micro).toSp() })
-                                }
-                                Text(
-                                    text = if (viewer.status == "Online") stringResource(id = R.string.online) else viewer.status,
-                                    color = if (viewer.status == "Online") Color(0xFF4CAF50) else Color.Red,
-                                    fontSize = with(density) { dimensionResource(id = R.dimen.text_caption).toSp() },
-                                    fontWeight = FontWeight.Bold
-                                )
-                            }
-                        }
-                    }
-                }
-            },
-            confirmButton = {
-                TextButton(onClick = { selectedSessionIdForViewers = null }) {
-                    Text(stringResource(id = R.string.close), color = Color(0xFF77AEFF))
-                }
-            },
-            containerColor = Color(0xFF1B1F26),
-            titleContentColor = Color.White,
-            textContentColor = Color.White
-        )
+            }
+            Spacer(modifier = Modifier.height(16.dp))
+            Text(
+                text = "ADD CAMERA",
+                color = Color.White.copy(alpha = 0.3f),
+                fontSize = 10.sp,
+                fontWeight = FontWeight.Bold,
+                letterSpacing = 1.sp
+            )
+        }
     }
+}
 
-    if (showBusyDialog) {
-        AlertDialog(
-            onDismissRequest = { },
-            title = { Text(stringResource(id = R.string.device_busy), color = Color.White) },
-            text = { Text(stringResource(id = R.string.device_busy_desc), color = Color.White) },
-            confirmButton = {
-                TextButton(onClick = { showBusyDialog = false }) {
-                    Text(stringResource(id = R.string.close), color = Color(0xFF77AEFF))
-                }
-            },
-            containerColor = Color(0xFF1B1F26),
-            titleContentColor = Color.White,
-            textContentColor = Color.White
-        )
-    }
-
-    if (showConnectDialog && selectedSessionIdForConnection != null) {
-        AlertDialog(
-            onDismissRequest = { showConnectDialog = false },
-            title = {
+@Composable
+fun DeviceRowItem(name: String, status: String, onActivate: () -> Unit) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(16.dp),
+        colors = CardDefaults.cardColors(containerColor = Color(0xFF161B22))
+    ) {
+        Row(
+            modifier = Modifier.padding(16.dp).fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Surface(
+                modifier = Modifier.size(40.dp),
+                shape = RoundedCornerShape(10.dp),
+                color = Color(0xFF1B232D)
+            ) {
+                Icon(
+                    ImageVector.vectorResource(id = R.drawable.smartphone),
+                    contentDescription = null,
+                    tint = Color.White.copy(alpha = 0.6f),
+                    modifier = Modifier.padding(8.dp)
+                )
+            }
+            Spacer(modifier = Modifier.width(16.dp))
+            Column(modifier = Modifier.weight(1f)) {
                 Text(
-                    text = stringResource(id = R.string.device_online_title),
+                    text = name,
+                    color = Color.White,
+                    fontSize = 14.sp,
                     fontWeight = FontWeight.Bold
                 )
-            },
-            text = {
-                Text(stringResource(id = R.string.connect_request_message))
-            },
-            confirmButton = {
-                TextButton(onClick = {
-                    showConnectDialog = false
-                    val sid = selectedSessionIdForConnection!!
+                Text(
+                    text = "JOINED 3D AGO", // Dummy joined time
+                    color = Color(0xFF9CA3AF),
+                    fontSize = 9.sp,
+                    fontWeight = FontWeight.Bold
+                )
+            }
+            Text(
+                text = status,
+                color = if (status == "ONLINE") Color.Green else Color(0xFF9CA3AF),
+                fontSize = 9.sp,
+                fontWeight = FontWeight.Bold,
+                modifier = Modifier.padding(horizontal = 12.dp)
+            )
+            Button(
+                onClick = onActivate,
+                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF1B232D)),
+                contentPadding = PaddingValues(horizontal = 16.dp, vertical = 0.dp),
+                modifier = Modifier.height(32.dp),
+                shape = RoundedCornerShape(8.dp)
+            ) {
+                Text("Activate", fontSize = 11.sp, color = Color.White, fontWeight = FontWeight.Bold)
+            }
+        }
+    }
+}
 
-                    val session = myCreatedSessions.find { it.sessionId == sid }
-                    val connectedDeviceId =
-                        session?.connectedDevices?.getOrNull(0)?.split(":")?.getOrNull(0) ?: ""
+@Composable
+fun ActivityItem(title: String, subtitle: String, time: String, icon: ImageVector) {
+    Row(
+        modifier = Modifier.fillMaxWidth().padding(vertical = 12.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Surface(
+            modifier = Modifier.size(36.dp),
+            shape = CircleShape,
+            color = Color(0xFF161B22)
+        ) {
+            Icon(
+                imageVector = icon,
+                contentDescription = null,
+                tint = Color.White.copy(alpha = 0.4f),
+                modifier = Modifier.padding(10.dp)
+            )
+        }
+        Spacer(modifier = Modifier.width(16.dp))
+        Column(modifier = Modifier.weight(1f)) {
+            Text(title, color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.Bold)
+            Text(subtitle, color = Color(0xFF9CA3AF), fontSize = 11.sp)
+        }
+        Text(time, color = Color(0xFF9CA3AF), fontSize = 11.sp)
+    }
+}
 
-                    val database = FirebaseDatabase.getInstance()
-                    val ref = database.getReference("SaveSessions")
-                        .child(connectedDeviceId.ifEmpty { "unknown" })
-                        .child(session?.sessionId.toString())
-
-                    val saveData = mapOf("status" to "Online")
-                    ref.setValue(saveData)
-                    ref.onDisconnect().removeValue()
-
-                    // Determine if we should act as Viewer or Monitor
-                    val isMyCreatedSession = myCreatedSessions.any { it.sessionId == sid }
-                    val isLive = activeSessions.contains(sid)
-
-                    if (isMyCreatedSession) {
-                        // We are the Monitor for this session
-                        if (!isLive) {
-                            viewModel.resumeHostSession(sid)
-                        }
-                        navController.navigate("camera_view/${Uri.encode(sid)}")
-                    } else {
-                        // We are a Viewer for this session
-                        navController.navigate("viewer/${Uri.encode(sid)}")
+@Composable
+fun UpgradeToMaxCard() {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(24.dp),
+        colors = CardDefaults.cardColors(containerColor = Color(0xFF161B22))
+    ) {
+        Column(modifier = Modifier.padding(24.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Surface(
+                    modifier = Modifier.size(32.dp),
+                    shape = RoundedCornerShape(8.dp),
+                    color = Color(0xFF1B232D)
+                ) {
+                    Icon(
+                        Icons.Outlined.Shield,
+                        contentDescription = null,
+                        tint = Color.White.copy(alpha = 0.4f),
+                        modifier = Modifier.padding(8.dp)
+                    )
+                }
+                Spacer(modifier = Modifier.width(12.dp))
+                Text(
+                    "UPGRADE TO MAX",
+                    color = Color.White,
+                    fontSize = 14.sp,
+                    fontWeight = FontWeight.Bold
+                )
+            }
+            Spacer(modifier = Modifier.height(16.dp))
+            Text(
+                "Unlock AI person detection, unlimited device recording, and high-fidelity cloud storage archives.",
+                color = Color(0xFF9CA3AF),
+                fontSize = 12.sp,
+                lineHeight = 18.sp
+            )
+            Spacer(modifier = Modifier.height(24.dp))
+            Button(
+                onClick = { /* Upgrade */ },
+                modifier = Modifier.fillMaxWidth().height(48.dp),
+                shape = RoundedCornerShape(12.dp),
+                colors = ButtonDefaults.buttonColors(containerColor = Color.Transparent),
+                contentPadding = PaddingValues()
+            ) {
+                Box(
+                    modifier = Modifier.fillMaxSize().background(
+                        brush = Brush.horizontalGradient(
+                            colors = listOf(Color(0xFFBBC6E2), Color(0xFF1B263B))
+                        )
+                    ),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text("SEE MAX", color = Color.Black, fontWeight = FontWeight.Bold)
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Icon(Icons.AutoMirrored.Filled.ArrowForward, null, tint = Color.Black, modifier = Modifier.size(16.dp))
                     }
-                }) {
-                    Text(stringResource(id = R.string.accept), color = Color(0xFF77AEFF))
                 }
-            },
-            dismissButton = {
-                TextButton(onClick = {
-                    showConnectDialog = false
-                    viewModel.declineRemoteSession(selectedSessionIdForConnection ?: "", myDeviceId)
-                }) {
-                    Text(stringResource(id = R.string.cancel), color = Color.Red)
-                }
-            },
-            containerColor = Color(0xFF1B1F26),
-            titleContentColor = Color.White,
-            textContentColor = Color.White
-        )
+            }
+        }
     }
 }
 
@@ -2090,7 +2772,7 @@ fun RecordsContent(
                                             } catch (e: Exception) {
                                                 android.widget.Toast.makeText(
                                                     context,
-                                                    context.getString(R.string.could_not_open_video),
+                                                    "Could not open video",
                                                     android.widget.Toast.LENGTH_SHORT
                                                 ).show()
                                             }
@@ -3871,6 +4553,383 @@ fun formatTimestamp(timestamp: Timestamp?): String {
     if (days < 7) return "${days}d ago"
     val sdf = SimpleDateFormat("MMM dd, yyyy", Locale.getDefault())
     return sdf.format(timestamp.toDate())
+}
+
+@Composable
+fun AddCameraDialog(
+    onDismiss: () -> Unit,
+    onManualCode: () -> Unit,
+    onConnectIPCamera: () -> Unit,
+    onScanSuccess: (String) -> Unit
+) {
+    Dialog(
+        onDismissRequest = onDismiss,
+        properties = DialogProperties(usePlatformDefaultWidth = false)
+    ) {
+        Surface(
+            modifier = Modifier
+                .fillMaxWidth(0.9f)
+                .fillMaxHeight(0.85f)
+                .clip(RoundedCornerShape(32.dp)),
+            color = Color(0xFF0E1116)
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(24.dp),
+                horizontalAlignment = Alignment.CenterHorizontally
+            ) {
+                // Header
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.End
+                ) {
+                    IconButton(onClick = onDismiss) {
+                        Icon(Icons.Default.Close, contentDescription = "Close", tint = Color.White)
+                    }
+                }
+
+                Text(
+                    text = "Add New Camera",
+                    color = Color.White,
+                    fontSize = 24.sp,
+                    fontWeight = FontWeight.Bold
+                )
+
+                Spacer(modifier = Modifier.height(16.dp))
+
+                Text(
+                    text = "Position the QR code located on the\nbottom of your camera within the\nscanner frame.",
+                    color = Color(0xFF9CA3AF),
+                    fontSize = 14.sp,
+                    textAlign = TextAlign.Center,
+                    lineHeight = 20.sp
+                )
+
+                Spacer(modifier = Modifier.height(32.dp))
+
+                // Scanner Frame
+                Box(
+                    modifier = Modifier
+                        .size(280.dp)
+                        .clip(RoundedCornerShape(32.dp))
+                        .background(Color.Black),
+                    contentAlignment = Alignment.Center
+                ) {
+                    var cameraControl by remember { mutableStateOf<CameraControl?>(null) }
+                    var flashEnabled by remember { mutableStateOf(false) }
+
+                    CameraScannerPreview(
+                        onScanSuccess = onScanSuccess,
+                        onCameraReady = { cameraControl = it }
+                    )
+
+                    // Frame Overlay
+                    ScannerFrameOverlay()
+
+                    // Scanning indicator
+                    Box(
+                        modifier = Modifier
+                            .align(Alignment.BottomCenter)
+                            .padding(bottom = 16.dp)
+                            .clip(RoundedCornerShape(20.dp))
+                            .background(Color.Black.copy(alpha = 0.5f))
+                            .padding(horizontal = 16.dp, vertical = 8.dp)
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            ScanningDot()
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text(
+                                "SCANNING...",
+                                color = Color.White,
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                            Spacer(modifier = Modifier.width(16.dp))
+                            IconButton(
+                                onClick = {
+                                    flashEnabled = !flashEnabled
+                                    cameraControl?.enableTorch(flashEnabled)
+                                },
+                                modifier = Modifier.size(20.dp)
+                            ) {
+                                Icon(
+                                    if (flashEnabled) Icons.Default.FlashOn else Icons.Default.FlashOff,
+                                    contentDescription = "Flash",
+                                    tint = Color.White,
+                                    modifier = Modifier.size(16.dp)
+                                )
+                            }
+                        }
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(48.dp))
+
+                // Buttons
+                Button(
+                    onClick = onManualCode,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(56.dp),
+                    shape = RoundedCornerShape(16.dp),
+                    colors = ButtonDefaults.buttonColors(containerColor = Color.Transparent),
+                    contentPadding = PaddingValues()
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .background(
+                                brush = Brush.horizontalGradient(
+                                    colors = listOf(Color(0xFFBBC6E2), Color(0xFF1B263B))
+                                )
+                            ),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(Icons.Default.Keyboard, contentDescription = null, tint = Color.Black)
+                            Spacer(modifier = Modifier.width(12.dp))
+                            Text("Add the code manually", color = Color.Black, fontWeight = FontWeight.Bold)
+                        }
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(16.dp))
+
+                Button(
+                    onClick = onConnectIPCamera,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(56.dp),
+                    shape = RoundedCornerShape(16.dp),
+                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF1B232D))
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(Icons.Default.Router, contentDescription = null, tint = Color.White)
+                        Spacer(modifier = Modifier.width(12.dp))
+                        Text("Connect IP camera", color = Color.White, fontWeight = FontWeight.Bold)
+                    }
+                }
+
+                Spacer(modifier = Modifier.weight(1f))
+
+                Text(
+                    text = "TROUBLE CONNECTING? ASK IRIS",
+                    color = Color(0xFF9CA3AF),
+                    fontSize = 10.sp,
+                    fontWeight = FontWeight.Bold,
+                    letterSpacing = 1.sp
+                )
+            }
+        }
+    }
+}
+
+@Composable
+fun CameraScannerPreview(onScanSuccess: (String) -> Unit, onCameraReady: (CameraControl) -> Unit) {
+    val context = LocalContext.current
+    val lifecycleOwner = LocalLifecycleOwner.current
+    val cameraProviderFuture = remember { ProcessCameraProvider.getInstance(context) }
+    var hasScanned by remember { mutableStateOf(false) }
+
+    AndroidView(
+        factory = { ctx ->
+            val previewView = PreviewView(ctx)
+            val executor = ContextCompat.getMainExecutor(ctx)
+            cameraProviderFuture.addListener({
+                val cameraProvider = cameraProviderFuture.get()
+                val preview = Preview.Builder().build().also {
+                    it.setSurfaceProvider(previewView.surfaceProvider)
+                }
+
+                val scanner = BarcodeScanning.getClient(
+                    BarcodeScannerOptions.Builder()
+                        .setBarcodeFormats(Barcode.FORMAT_QR_CODE)
+                        .build()
+                )
+
+                val imageAnalysis = ImageAnalysis.Builder()
+                    .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
+                    .build()
+
+                @androidx.camera.core.ExperimentalGetImage
+                imageAnalysis.setAnalyzer(Executors.newSingleThreadExecutor()) { imageProxy ->
+                    if (hasScanned) {
+                        imageProxy.close()
+                        return@setAnalyzer
+                    }
+
+                    val mediaImage = imageProxy.image
+                    if (mediaImage != null) {
+                        val image = InputImage.fromMediaImage(mediaImage, imageProxy.imageInfo.rotationDegrees)
+                        scanner.process(image)
+                            .addOnSuccessListener { barcodes ->
+                                for (barcode in barcodes) {
+                                    val value = barcode.rawValue
+                                    if (value != null && !hasScanned) {
+                                        hasScanned = true
+                                        try {
+                                            val json = JSONObject(value)
+                                            val scannedSessionId = json.getString("session_id")
+                                            onScanSuccess(scannedSessionId)
+                                        } catch (e: Exception) {
+                                            onScanSuccess(value)
+                                        }
+                                    }
+                                }
+                            }
+                            .addOnCompleteListener {
+                                imageProxy.close()
+                            }
+                    } else {
+                        imageProxy.close()
+                    }
+                }
+
+                val cameraSelector = CameraSelector.DEFAULT_BACK_CAMERA
+
+                try {
+                    cameraProvider.unbindAll()
+                    val camera = cameraProvider.bindToLifecycle(
+                        lifecycleOwner,
+                        cameraSelector,
+                        preview,
+                        imageAnalysis
+                    )
+                    onCameraReady(camera.cameraControl)
+                } catch (e: Exception) {
+                    e.printStackTrace()
+                }
+            }, executor)
+            previewView
+        },
+        modifier = Modifier.fillMaxSize()
+    )
+}
+
+@Composable
+fun ScannerFrameOverlay() {
+    val strokeWidth = 4.dp
+    val cornerSize = 40.dp
+    val radius = 12.dp
+
+    Canvas(modifier = Modifier.fillMaxSize().padding(24.dp)) {
+        val strokeWidthPx = strokeWidth.toPx()
+        val cornerSizePx = cornerSize.toPx()
+        val radiusPx = radius.toPx()
+
+        // Top Left
+        drawPath(
+            path = androidx.compose.ui.graphics.Path().apply {
+                moveTo(0f, cornerSizePx)
+                lineTo(0f, radiusPx)
+                quadraticTo(0f, 0f, radiusPx, 0f)
+                lineTo(cornerSizePx, 0f)
+            },
+            color = Color(0xFFBBC6E2),
+            style = Stroke(strokeWidthPx)
+        )
+
+        // Top Right
+        drawPath(
+            path = androidx.compose.ui.graphics.Path().apply {
+                moveTo(size.width - cornerSizePx, 0f)
+                lineTo(size.width - radiusPx, 0f)
+                quadraticTo(size.width, 0f, size.width, radiusPx)
+                lineTo(size.width, cornerSizePx)
+            },
+            color = Color(0xFFBBC6E2),
+            style = Stroke(strokeWidthPx)
+        )
+
+        // Bottom Left
+        drawPath(
+            path = androidx.compose.ui.graphics.Path().apply {
+                moveTo(0f, size.height - cornerSizePx)
+                lineTo(0f, size.height - radiusPx)
+                quadraticTo(0f, size.height, radiusPx, size.height)
+                lineTo(cornerSizePx, size.height)
+            },
+            color = Color(0xFFBBC6E2),
+            style = Stroke(strokeWidthPx)
+        )
+
+        // Bottom Right
+        drawPath(
+            path = androidx.compose.ui.graphics.Path().apply {
+                moveTo(size.width - cornerSizePx, size.height)
+                lineTo(size.width - radiusPx, size.height)
+                quadraticTo(size.width, size.height, size.width, size.height - radiusPx)
+                lineTo(size.width, size.height - cornerSizePx)
+            },
+            color = Color(0xFFBBC6E2),
+            style = Stroke(strokeWidthPx)
+        )
+    }
+}
+
+@Composable
+fun ScanningDot() {
+    val infiniteTransition = rememberInfiniteTransition(label = "dot")
+    val alpha by infiniteTransition.animateFloat(
+        initialValue = 0.4f,
+        targetValue = 1f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(800),
+            repeatMode = RepeatMode.Reverse
+        ),
+        label = "alpha"
+    )
+    Surface(
+        modifier = Modifier.size(8.dp),
+        shape = CircleShape,
+        color = Color.White.copy(alpha = alpha)
+    ) {}
+}
+
+@Composable
+fun ManualPairingDialog(
+    onDismiss: () -> Unit,
+    onConnect: (String) -> Unit
+) {
+    var pairingCode by remember { mutableStateOf("") }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Add the code manually", color = Color.White) },
+        text = {
+            Column {
+                Text("Enter the 9 or 10-digit code shown on the camera device.", color = Color(0xFF9CA3AF), fontSize = 14.sp)
+                Spacer(modifier = Modifier.height(16.dp))
+                OutlinedTextField(
+                    value = pairingCode,
+                    onValueChange = { pairingCode = it },
+                    label = { Text("Pairing Code") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedTextColor = Color.White,
+                        unfocusedTextColor = Color.White,
+                        focusedBorderColor = Color(0xFF77AEFF),
+                        unfocusedBorderColor = Color.White.copy(alpha = 0.5f)
+                    )
+                )
+            }
+        },
+        confirmButton = {
+            Button(
+                onClick = { if (pairingCode.isNotEmpty()) onConnect(pairingCode) },
+                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF77AEFF))
+            ) {
+                Text("Connect", color = Color.Black, fontWeight = FontWeight.Bold)
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text("Cancel", color = Color.Gray)
+            }
+        },
+        containerColor = Color(0xFF1B1F26)
+    )
 }
 
 @Composable

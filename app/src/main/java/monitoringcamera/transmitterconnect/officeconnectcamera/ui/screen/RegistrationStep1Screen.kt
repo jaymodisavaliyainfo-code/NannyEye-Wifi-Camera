@@ -123,8 +123,10 @@ fun RegistrationStep1Screen(
                                     .addOnSuccessListener { document ->
                                         isLoading = false
                                         if (document.exists() && !document.getString("username").isNullOrBlank()) {
+                                            viewModel.isGoogleLogin = true
                                             onNavigateToProfile()
                                         } else {
+                                            viewModel.isGoogleLogin = true
                                             viewModel.fullName = user.displayName ?: ""
                                             viewModel.email = user.email ?: ""
                                             onNavigateToProfile()
@@ -132,6 +134,7 @@ fun RegistrationStep1Screen(
                                     }
                                     .addOnFailureListener {
                                         isLoading = false
+                                        viewModel.isGoogleLogin = true
                                         viewModel.fullName = user.displayName ?: ""
                                         viewModel.email = user.email ?: ""
                                         onNavigateToProfile()

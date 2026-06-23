@@ -49,6 +49,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
     private val tag = "CameraViewModel"
 
     val webRTCManager: WebRTCManager = WebRTCManager(application)
+    val remotePreviewManager: WebRTCManager = WebRTCManager(application)
     private val audioManager: AudioManager =
         application.getSystemService(Context.AUDIO_SERVICE) as AudioManager
 
@@ -58,6 +59,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
     val deviceName = MutableLiveData<String>("")
     val qrBitmap = MutableLiveData<Bitmap>()
     val isConnected: LiveData<Boolean> = webRTCManager.connectionState
+    val isRemoteConnected: LiveData<Boolean> = remotePreviewManager.connectionState
     val sessionStatus: LiveData<String?> = webRTCManager.sessionStatus
     val isFrontFacing: LiveData<Boolean> = webRTCManager.isFrontFacingLiveData
 
@@ -619,6 +621,15 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         viewerRef.onDisconnect().removeValue()
 
         webRTCManager.connectAsViewer(sessionId, remoteSink, dId)
+    }
+
+    fun startRemotePreview(sessionId: String, sink: VideoSink) {
+        val dId = myDeviceId.value ?: ""
+        remotePreviewManager.connectAsViewer(sessionId, sink, dId)
+    }
+
+    fun stopRemotePreview() {
+        remotePreviewManager.release()
     }
 
     fun stopViewing(sink: VideoSink? = null) {

@@ -27,7 +27,8 @@ import monitoringcamera.transmitterconnect.officeconnectcamera.AuthViewModel
 fun SignOutConfirmationScreen(
     onKeepMonitoring: () -> Unit,
     onSignOutConfirmed: () -> Unit,
-    authViewModel: AuthViewModel
+    authViewModel: AuthViewModel,
+    registrationViewModel: RegistrationViewModel
 ) {
     val context = LocalContext.current
     val prefs = context.getSharedPreferences("app_prefs", Context.MODE_PRIVATE)
@@ -134,6 +135,7 @@ fun SignOutConfirmationScreen(
                         onClick = {
                             // Clear all data
                             authViewModel.signOut()
+                            registrationViewModel.reset()
                             prefs.edit().clear().apply()
                             onSignOutConfirmed()
                         },
