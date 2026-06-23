@@ -420,6 +420,21 @@ fun AppNavigation() {
         detailScreen("linked_devices_screen") { _ ->
             LinkedDevicesScreen(navController)
         }
+        detailScreen("all_devices_screen") { _ ->
+            AllDevicesScreen(
+                onBack = { navController.popBackStack() },
+                onActivate = { sessionId ->
+                    navController.navigate("viewer/${Uri.encode(sessionId)}")
+                },
+                viewModel = cameraViewModel
+            )
+        }
+        detailScreen("all_activities_screen") { _ ->
+            AllActivitiesScreen(
+                navController = navController,
+                viewModel = cameraViewModel
+            )
+        }
     }
 }
 

@@ -46,6 +46,7 @@ import androidx.compose.material.icons.automirrored.outlined.HelpOutline
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Adjust
 import androidx.compose.material.icons.filled.CalendarToday
+import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Delete
@@ -59,7 +60,7 @@ import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.PlayCircle
 import androidx.compose.material.icons.filled.Podcasts
-import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.Router
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Shield
@@ -100,6 +101,8 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.TopAppBar
+import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.material3.rememberDatePickerState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
@@ -171,7 +174,8 @@ import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.material.icons.filled.FlashOff
 import androidx.compose.material.icons.filled.FlashOn
 import androidx.compose.material.icons.filled.Keyboard
-import androidx.compose.material.icons.filled.Router
+import androidx.compose.material.icons.filled.Mic
+import androidx.compose.material.icons.filled.MicOff
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.viewinterop.AndroidView
@@ -185,6 +189,7 @@ import org.webrtc.SurfaceViewRenderer
 import org.webrtc.VideoSink
 import android.view.ViewGroup
 import android.widget.FrameLayout
+import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.ui.graphics.drawscope.Fill
 
 @Composable
@@ -221,7 +226,10 @@ fun MainScreen(
 
     ) { innerPadding ->
         HorizontalPager(
-            state = pagerState, modifier = Modifier.padding(innerPadding), userScrollEnabled = true
+            state = pagerState,
+            modifier = Modifier.padding(innerPadding),
+            userScrollEnabled = true,
+            beyondViewportPageCount = 3
         ) { page ->
             when (page) {
                 0 -> DashboardContent(navController, viewModel, authViewModel, linkedDevicesViewModel)
@@ -263,14 +271,77 @@ fun DashboardContent(
     val isRemoteConnected by viewModel.isRemoteConnected.observeAsState(false)
     val sessionId by viewModel.sessionId.observeAsState("")
     val qrBitmap by viewModel.qrBitmap.observeAsState()
+    val cameraActivities by viewModel.cameraActivities.observeAsState(emptyList())
 
-    var activePreviewSessionId by remember { mutableStateOf<String?>(null) }
-    var activePreviewDeviceName by remember { mutableStateOf("") }
+    val activePreviewSessionId by viewModel.activePreviewSessionId.observeAsState(null)
+    val activePreviewDeviceName by viewModel.activePreviewDeviceName.observeAsState("")
 
     var showQrDialog by remember { mutableStateOf(false) }
     var showAddCameraDialog by remember { mutableStateOf(false) }
     var showManualPairingDialog by remember { mutableStateOf(false) }
     var showIPCameraSetupDialog by remember { mutableStateOf(false) }
+    var showPermissionDialog by remember { mutableStateOf(false) }
+
+    val permissions = arrayOf(
+        Manifest.permission.CAMERA,
+        Manifest.permission.RECORD_AUDIO
+    )
+
+    var pendingAction by remember { mutableStateOf<String?>(null) }
+
+    val permissionLauncher = rememberLauncherForActivityResult(
+        androidx.activity.result.contract.ActivityResultContracts.RequestMultiplePermissions()
+    ) { results ->
+        if (results.all { it.value }) {
+            when (pendingAction) {
+                "start_broadcasting" -> {
+                    viewModel.generateHostSession()
+                    showQrDialog = true
+                }
+                "add_camera" -> {
+                    showAddCameraDialog = true
+                }
+            }
+            pendingAction = null
+        } else {
+            val cameraGranted = results[Manifest.permission.CAMERA] ?: false
+            val audioGranted = results[Manifest.permission.RECORD_AUDIO] ?: false
+
+            val cameraPermanentlyDenied =
+                !cameraGranted && !ActivityCompat.shouldShowRequestPermissionRationale(
+                    activity, Manifest.permission.CAMERA
+                )
+            val audioPermanentlyDenied =
+                !audioGranted && !ActivityCompat.shouldShowRequestPermissionRationale(
+                    activity, Manifest.permission.RECORD_AUDIO
+                )
+
+            if (cameraPermanentlyDenied || audioPermanentlyDenied) {
+                showPermissionDialog = true
+            }
+            pendingAction = null
+        }
+    }
+
+    val checkAndRequestPermissions: (String) -> Unit = { action ->
+        val allGranted = permissions.all {
+            ContextCompat.checkSelfPermission(context, it) == PackageManager.PERMISSION_GRANTED
+        }
+        if (allGranted) {
+            when (action) {
+                "start_broadcasting" -> {
+                    viewModel.generateHostSession()
+                    showQrDialog = true
+                }
+                "add_camera" -> {
+                    showAddCameraDialog = true
+                }
+            }
+        } else {
+            pendingAction = action
+            permissionLauncher.launch(permissions)
+        }
+    }
 
     // Close QR dialog automatically when connected
     LaunchedEffect(isConnected) {
@@ -495,8 +566,10 @@ fun DashboardContent(
                     sessionId = sessionId,
                     viewModel = viewModel,
                     onStartCamera = {
-                        viewModel.generateHostSession()
-                        showQrDialog = true
+                        checkAndRequestPermissions("start_broadcasting")
+                    },
+                    onCardClick = {
+                        navController.navigate("camera_view/${Uri.encode(sessionId)}")
                     }
                 )
             }
@@ -506,14 +579,19 @@ fun DashboardContent(
                         sessionId = sid,
                         deviceName = activePreviewDeviceName,
                         viewModel = viewModel,
-                        onClose = { activePreviewSessionId = null },
+                        onClose = {
+                            viewModel.activePreviewSessionId.value = null
+                            viewModel.stopRemotePreview()
+                        },
                         onClick = { navController.navigate("viewer/${Uri.encode(sid)}") }
                     )
                 }
             }
             item {
                 AddCameraCard(
-                    onClick = { showAddCameraDialog = true }
+                    onClick = {
+                        checkAndRequestPermissions("add_camera")
+                    }
                 )
             }
         }
@@ -536,27 +614,34 @@ fun DashboardContent(
                 Icons.Default.Add,
                 contentDescription = null,
                 tint = Color.White.copy(alpha = 0.6f),
-                modifier = Modifier.size(20.dp).clickable { navController.navigate("add_device") }
+                modifier = Modifier.size(20.dp).clickable { navController.navigate("all_devices_screen") }
             )
         }
 
         Spacer(modifier = Modifier.height(16.dp))
 
-        savedDevices.take(3).forEach { device ->
-            val isLive = onlineMonitors[device.deviceId]?.sessionId == device.sessionId
-            DeviceRowItem(
-                name = device.name,
-                status = if (isLive) "ONLINE" else "OFFLINE",
-                onActivate = {
-                    if (isLive) {
-                        navController.navigate("viewer/${Uri.encode(device.sessionId)}")
-                    } else {
-                        // Handle offline device connection request
+        Card(
+            modifier = Modifier.fillMaxWidth(),
+            shape = RoundedCornerShape(24.dp),
+            colors = CardDefaults.cardColors(containerColor = Color(0xFF1B1F25))
+        ) {
+            savedDevices.take(3).forEach { device ->
+                val isLive = onlineMonitors[device.deviceId]?.sessionId == device.sessionId
+                DeviceRowItem(
+                    name = device.name,
+                    timestamp = device.timestamp,
+                    status = if (isLive) "ONLINE" else "OFFLINE",
+                    onActivate = {
+                        if (isLive) {
+                            navController.navigate("viewer/${Uri.encode(device.sessionId)}")
+                        } else {
+                            // Handle offline device connection request
+                        }
                     }
-                }
-            )
-            Spacer(modifier = Modifier.height(12.dp))
+                )
+            }
         }
+
 
         Spacer(modifier = Modifier.height(32.dp))
 
@@ -577,15 +662,29 @@ fun DashboardContent(
                 color = Color(0xFF9CA3AF),
                 fontSize = 10.sp,
                 fontWeight = FontWeight.Bold,
-                modifier = Modifier.clickable { /* All Activity */ }
+                modifier = Modifier.clickable { navController.navigate("all_activities_screen") }
             )
         }
 
         Spacer(modifier = Modifier.height(16.dp))
 
-        ActivityItem(title = "Camera stopped", subtitle = "This device", time = "16:47", icon = Icons.Default.VideocamOff)
-        ActivityItem(title = "Monitor connected", subtitle = "samsung SM-S928B", time = "12:48", icon = Icons.Default.Person)
-        ActivityItem(title = "Camera started", subtitle = "This device", time = "12:44", icon = Icons.Default.Videocam)
+        if (cameraActivities.isEmpty()) {
+            Text(
+                text = "No recent activity",
+                color = Color(0xFF9CA3AF),
+                fontSize = 12.sp,
+                modifier = Modifier.padding(vertical = 16.dp)
+            )
+        } else {
+            cameraActivities.take(5).forEach { activity ->
+                ActivityItem(
+                    title = activity.title,
+                    subtitle = activity.subtitle,
+                    time = formatActivityTime(activity.timestamp),
+                    iconType = activity.iconType
+                )
+            }
+        }
 
         Spacer(modifier = Modifier.height(32.dp))
 
@@ -593,6 +692,19 @@ fun DashboardContent(
         UpgradeToMaxCard()
 
         Spacer(modifier = Modifier.height(80.dp))
+    }
+
+    if (showPermissionDialog) {
+        CustomPermissionDialog(
+            onDismiss = { showPermissionDialog = false },
+            onOpenSettings = {
+                showPermissionDialog = false
+                val intent = Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
+                    data = Uri.fromParts("package", context.packageName, null)
+                }
+                context.startActivity(intent)
+            }
+        )
     }
 
     if (showAddCameraDialog) {
@@ -607,8 +719,8 @@ fun DashboardContent(
                 showIPCameraSetupDialog = true
             },
             onScanSuccess = { sessionId: String ->
-                activePreviewSessionId = sessionId
-                activePreviewDeviceName = "Remote Camera"
+                viewModel.activePreviewSessionId.value = sessionId
+                viewModel.activePreviewDeviceName.value = "Remote Camera"
                 viewModel.fetchAndSaveDeviceMetadata(sessionId)
             }
         )
@@ -837,7 +949,8 @@ fun ThisDeviceCard(
     isConnected: Boolean,
     sessionId: String,
     viewModel: CameraViewModel,
-    onStartCamera: () -> Unit
+    onStartCamera: () -> Unit,
+    onCardClick: () -> Unit
 ) {
     val density = LocalDensity.current
     val cardWidth = 280.dp
@@ -854,7 +967,9 @@ fun ThisDeviceCard(
     }
 
     Card(
-        modifier = Modifier.size(width = cardWidth, height = cardHeight),
+        modifier = Modifier
+            .size(width = cardWidth, height = cardHeight)
+            .clickable(enabled = isBroadcasting) { onCardClick() },
         shape = RoundedCornerShape(24.dp),
         colors = CardDefaults.cardColors(containerColor = Color(0xFF161B22))
     ) {
@@ -1116,12 +1231,6 @@ fun RemoteDeviceCard(
                 }
             }
 
-            DisposableEffect(Unit) {
-                onDispose {
-                    viewModel.stopRemotePreview()
-                }
-            }
-
             // Remote Camera Preview
             AndroidView(
                 factory = { ctx ->
@@ -1130,7 +1239,7 @@ fun RemoteDeviceCard(
                             ViewGroup.LayoutParams.MATCH_PARENT,
                             ViewGroup.LayoutParams.MATCH_PARENT
                         )
-                        viewModel.initRenderer(this, false)
+                        viewModel.initRenderer(this, true)
                         remoteSink = this
                     }
                 },
@@ -1236,10 +1345,17 @@ fun AddCameraCard(onClick: () -> Unit) {
 }
 
 @Composable
-fun DeviceRowItem(name: String, status: String, onActivate: () -> Unit) {
+fun DeviceRowItem(name: String, timestamp: Long, status: String, onActivate: () -> Unit) {
+    val joinedText = remember(timestamp) {
+        val diff = System.currentTimeMillis() - timestamp
+        val days = diff / (1000 * 60 * 60 * 24)
+        if (days <= 0) "JOINED TODAY" else "JOINED ${days}D AGO"
+    }
+
     Card(
-        modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(16.dp),
+        modifier = Modifier.fillMaxWidth()
+            .padding(10.dp),
+        shape = RoundedCornerShape(24.dp),
         colors = CardDefaults.cardColors(containerColor = Color(0xFF161B22))
     ) {
         Row(
@@ -1247,76 +1363,119 @@ fun DeviceRowItem(name: String, status: String, onActivate: () -> Unit) {
             verticalAlignment = Alignment.CenterVertically
         ) {
             Surface(
-                modifier = Modifier.size(40.dp),
-                shape = RoundedCornerShape(10.dp),
-                color = Color(0xFF1B232D)
+                modifier = Modifier.size(52.dp),
+                shape = RoundedCornerShape(14.dp),
+                color = Color(0xFF1C222B),
+                border = BorderStroke(1.dp, Color.White.copy(alpha = 0.05f))
             ) {
-                Icon(
-                    ImageVector.vectorResource(id = R.drawable.smartphone),
-                    contentDescription = null,
-                    tint = Color.White.copy(alpha = 0.6f),
-                    modifier = Modifier.padding(8.dp)
-                )
+                Box(contentAlignment = Alignment.Center) {
+                    Icon(
+                        ImageVector.vectorResource(id = R.drawable.smartphone),
+                        contentDescription = null,
+                        tint = Color.White.copy(alpha = 0.6f),
+                        modifier = Modifier.size(24.dp)
+                    )
+                }
             }
             Spacer(modifier = Modifier.width(16.dp))
             Column(modifier = Modifier.weight(1f)) {
                 Text(
                     text = name,
                     color = Color.White,
-                    fontSize = 14.sp,
-                    fontWeight = FontWeight.Bold
+                    fontSize = 15.sp,
+                    fontWeight = FontWeight.Bold,
+                    maxLines = 2
                 )
                 Text(
-                    text = "JOINED 3D AGO", // Dummy joined time
+                    text = joinedText,
                     color = Color(0xFF9CA3AF),
-                    fontSize = 9.sp,
-                    fontWeight = FontWeight.Bold
+                    fontSize = 10.sp,
+                    fontWeight = FontWeight.Bold,
+                    letterSpacing = 0.5.sp
                 )
             }
-            Text(
-                text = status,
-                color = if (status == "ONLINE") Color.Green else Color(0xFF9CA3AF),
-                fontSize = 9.sp,
-                fontWeight = FontWeight.Bold,
-                modifier = Modifier.padding(horizontal = 12.dp)
-            )
+            
+            // Status Capsule
+            Surface(
+                color = Color(0xFF1B232D).copy(alpha = 0.5f),
+                shape = RoundedCornerShape(12.dp),
+                modifier = Modifier.padding(horizontal = 8.dp)
+            ) {
+                Text(
+                    text = status,
+                    color = if (status == "ONLINE") Color(0xFF4CAF50) else Color(0xFF9CA3AF).copy(alpha = 0.6f),
+                    fontSize = 9.sp,
+                    fontWeight = FontWeight.Bold,
+                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp)
+                )
+            }
+            
             Button(
                 onClick = onActivate,
                 colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF1B232D)),
                 contentPadding = PaddingValues(horizontal = 16.dp, vertical = 0.dp),
-                modifier = Modifier.height(32.dp),
-                shape = RoundedCornerShape(8.dp)
+                modifier = Modifier.height(36.dp),
+                shape = RoundedCornerShape(10.dp)
             ) {
-                Text("Activate", fontSize = 11.sp, color = Color.White, fontWeight = FontWeight.Bold)
+                Text("Activate", fontSize = 12.sp, color = Color.White, fontWeight = FontWeight.Bold)
             }
         }
     }
 }
 
 @Composable
-fun ActivityItem(title: String, subtitle: String, time: String, icon: ImageVector) {
-    Row(
-        modifier = Modifier.fillMaxWidth().padding(vertical = 12.dp),
-        verticalAlignment = Alignment.CenterVertically
+fun ActivityItem(title: String, subtitle: String, time: String, iconType: String) {
+    Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 6.dp),
+        shape = RoundedCornerShape(24.dp),
+        colors = CardDefaults.cardColors(containerColor = Color(0xFF1B1F25))
     ) {
-        Surface(
-            modifier = Modifier.size(36.dp),
-            shape = CircleShape,
-            color = Color(0xFF161B22)
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(16.dp),
+            verticalAlignment = Alignment.CenterVertically
         ) {
-            Icon(
-                imageVector = icon,
-                contentDescription = null,
-                tint = Color.White.copy(alpha = 0.4f),
-                modifier = Modifier.padding(10.dp)
+            Box(
+                modifier = Modifier
+                    .size(48.dp)
+                    .clip(CircleShape)
+                    .background(getActivityIconColor(iconType).copy(alpha = 0.1f)),
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(
+                    imageVector = getActivityIcon(iconType),
+                    contentDescription = null,
+                    tint = getActivityIconColor(iconType),
+                    modifier = Modifier.size(22.dp)
+                )
+            }
+
+            Spacer(modifier = Modifier.width(16.dp))
+
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = title,
+                    color = Color.White,
+                    fontSize = 16.sp,
+                    fontWeight = FontWeight.Bold
+                )
+                Text(
+                    text = subtitle,
+                    color = Color(0xFF9CA3AF),
+                    fontSize = 13.sp
+                )
+            }
+
+            Text(
+                text = time,
+                color = Color(0xFF9CA3AF),
+                fontSize = 12.sp,
+                fontWeight = FontWeight.Medium
             )
         }
-        Spacer(modifier = Modifier.width(16.dp))
-        Column(modifier = Modifier.weight(1f)) {
-            Text(title, color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.Bold)
-            Text(subtitle, color = Color(0xFF9CA3AF), fontSize = 11.sp)
-        }
-        Text(time, color = Color(0xFF9CA3AF), fontSize = 11.sp)
     }
 }
 
@@ -1383,7 +1542,7 @@ fun UpgradeToMaxCard() {
     }
 }
 
-@Composable
+/*@Composable
 fun RecentSessionItem(
     session: CameraViewModel.SessionRecord,
     isLive: Boolean,
@@ -1583,7 +1742,7 @@ fun RecentSessionItem(
             textContentColor = Color.White
         )
     }
-}
+}*/
 
 @Composable
 fun IPCameraStreamItem(
@@ -4555,6 +4714,108 @@ fun formatTimestamp(timestamp: Timestamp?): String {
     return sdf.format(timestamp.toDate())
 }
 
+fun formatActivityTime(timestamp: Long): String {
+    val sdf = SimpleDateFormat("HH:mm", Locale.getDefault())
+    return sdf.format(Date(timestamp))
+}
+
+@Composable
+fun getActivityIcon(type: String): ImageVector {
+    return when (type) {
+        "camera_start" -> Icons.Default.Videocam
+        "camera_stop" -> Icons.Default.VideocamOff
+        "monitor_connect" -> Icons.Default.Podcasts
+        "monitor_disconnect" -> Icons.Default.Close
+        "reconnecting" -> Icons.Default.Refresh
+        "connection_lost" -> Icons.Outlined.ErrorOutline
+        "live_start" -> Icons.Default.PlayCircle
+        "live_end" -> Icons.Default.Adjust
+        "audio_mute" -> Icons.Default.MicOff
+        "audio_unmute" -> Icons.Default.Mic
+        "viewer_connect" -> Icons.Default.Person
+        "viewer_disconnect" -> Icons.Default.Person
+        "screenshot" -> Icons.Default.Visibility
+        "video_record" -> Icons.Default.History
+        else -> Icons.Default.CheckCircle
+    }
+}
+
+fun getActivityIconColor(type: String): Color {
+    return when (type) {
+        "camera_start", "monitor_connect", "live_start", "audio_unmute", "viewer_connect" -> Color(0xFF77AEFF)
+        "camera_stop", "monitor_disconnect", "connection_lost", "live_end", "audio_mute", "viewer_disconnect" -> Color(0xFFFF8A80)
+        "reconnecting" -> Color(0xFFFFD54F)
+        "screenshot", "video_record" -> Color(0xFFBBC6E2)
+        else -> Color.White
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun AllActivitiesScreen(
+    navController: NavController,
+    viewModel: CameraViewModel
+) {
+    val cameraActivities by viewModel.cameraActivities.observeAsState(emptyList())
+
+    Scaffold(
+        topBar = {
+            TopAppBar(
+                title = {
+                    Text(
+                        "Camera Activity",
+                        color = Color.White,
+                        fontSize = 20.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                },
+                navigationIcon = {
+                    IconButton(onClick = { navController.popBackStack() }) {
+                        Icon(
+                            Icons.AutoMirrored.Filled.ArrowForward,
+                            contentDescription = "Back",
+                            tint = Color.White,
+                            modifier = Modifier.rotate(180f)
+                        )
+                    }
+                },
+                colors = TopAppBarDefaults.topAppBarColors(
+                    containerColor = Color(0xFF0E1116)
+                )
+            )
+        },
+        containerColor = Color(0xFF0E1116)
+    ) { padding ->
+        if (cameraActivities.isEmpty()) {
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(padding),
+                contentAlignment = Alignment.Center
+            ) {
+                Text(text = "No activity recorded yet", color = Color(0xFF9CA3AF))
+            }
+        } else {
+            LazyColumn(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(padding)
+                    .padding(horizontal = 16.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                items(cameraActivities) { activity ->
+                    ActivityItem(
+                        title = activity.title,
+                        subtitle = activity.subtitle,
+                        time = formatActivityTime(activity.timestamp),
+                        iconType = activity.iconType
+                    )
+                }
+            }
+        }
+    }
+}
+
 @Composable
 fun AddCameraDialog(
     onDismiss: () -> Unit,
@@ -4930,6 +5191,68 @@ fun ManualPairingDialog(
         },
         containerColor = Color(0xFF1B1F26)
     )
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun AllDevicesScreen(
+    onBack: () -> Unit,
+    onActivate: (String) -> Unit,
+    viewModel: CameraViewModel
+) {
+    val savedDevices by viewModel.savedDevices.observeAsState(emptyList())
+    val onlineMonitors by viewModel.onlineMonitors.observeAsState(emptyMap())
+
+    Scaffold(
+        topBar = {
+            TopAppBar(
+                title = {
+                    Text(
+                        "Recently Joined",
+                        color = Color.White,
+                        fontSize = 20.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                },
+                navigationIcon = {
+                    IconButton(onClick = onBack) {
+                        Icon(
+                            Icons.AutoMirrored.Filled.ArrowForward,
+                            contentDescription = "Back",
+                            tint = Color.White,
+                            modifier = Modifier.rotate(180f)
+                        )
+                    }
+                },
+                colors = TopAppBarDefaults.topAppBarColors(
+                    containerColor = Color(0xFF0E1116)
+                )
+            )
+        },
+        containerColor = Color(0xFF0E1116)
+    ) { padding ->
+        LazyColumn(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(padding)
+                .padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            items(savedDevices) { device ->
+                val isLive = onlineMonitors[device.deviceId]?.sessionId == device.sessionId
+                DeviceRowItem(
+                    name = device.name,
+                    timestamp = device.timestamp,
+                    status = if (isLive) "ONLINE" else "OFFLINE",
+                    onActivate = {
+                        if (isLive) {
+                            onActivate(device.sessionId)
+                        }
+                    }
+                )
+            }
+        }
+    }
 }
 
 @Composable

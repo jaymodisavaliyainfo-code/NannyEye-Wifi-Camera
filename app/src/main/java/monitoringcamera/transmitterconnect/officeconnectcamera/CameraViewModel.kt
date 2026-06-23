@@ -58,6 +58,8 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
     val sessionId = MutableLiveData<String>("")
     val deviceName = MutableLiveData<String>("")
     val qrBitmap = MutableLiveData<Bitmap>()
+    val activePreviewSessionId = MutableLiveData<String?>(null)
+    val activePreviewDeviceName = MutableLiveData<String>("")
     val isConnected: LiveData<Boolean> = webRTCManager.connectionState
     val isRemoteConnected: LiveData<Boolean> = remotePreviewManager.connectionState
     val sessionStatus: LiveData<String?> = webRTCManager.sessionStatus
@@ -66,27 +68,31 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
     private val _connectedViewers = MutableLiveData<List<ViewerInfo>>(emptyList())
     val connectedViewers: LiveData<List<ViewerInfo>> = _connectedViewers
 
-    private val _myCreatedSessions = MutableLiveData<List<SessionRecord>>(emptyList())
-    val myCreatedSessions: LiveData<List<SessionRecord>> = _myCreatedSessions
-
     private val auth = FirebaseAuth.getInstance()
     private val firestore = FirebaseFirestore.getInstance()
-    private var connectedCamerasListener: ListenerRegistration? = null
-    private var monitorCamerasListener: ListenerRegistration? = null
+    private val database = DeviceDatabase.getInstance(application)
+    private val cameraActivityDao = database.cameraActivityDao()
+    private val pairedDeviceDao = database.pairedDeviceDao()
     private var ipCamerasListener: ListenerRegistration? = null
+    private val loggedViewerSessions = mutableSetOf<String>()
+    private var lastLoggedActivity: Pair<String, String>? = null
+    private var lastLogTimestamp: Long = 0
 
     // Persistent storage for settings and limits (kept for device-specific values)
     private val settingsPrefs = application.getSharedPreferences("app_settings", Context.MODE_PRIVATE)
     private val limitPrefs = application.getSharedPreferences("DailyLimitPrefs", Context.MODE_PRIVATE)
 
-    private val _savedDevices = MutableLiveData<List<DeviceMetadata>>(emptyList())
-    val savedDevices: LiveData<List<DeviceMetadata>> = _savedDevices
+    private val _savedDevices = MutableLiveData<List<PairedDevice>>(emptyList())
+    val savedDevices: LiveData<List<PairedDevice>> = _savedDevices
 
     private val _roomDevices = MutableLiveData<List<Device>>(emptyList())
     val roomDevices: LiveData<List<Device>> = _roomDevices
 
     private val _videoRecords = MutableLiveData<List<VideoRecord>>(emptyList())
     val videoRecords: LiveData<List<VideoRecord>> = _videoRecords
+
+    private val _cameraActivities = MutableLiveData<List<CameraActivity>>(emptyList())
+    val cameraActivities: LiveData<List<CameraActivity>> = _cameraActivities
 
     private val _isLoadingVideos = MutableLiveData(false)
     val isLoadingVideos: LiveData<Boolean> = _isLoadingVideos
@@ -96,21 +102,6 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
 
     private val _dailyLimitSeconds = MutableLiveData(300)
     val dailyLimitSeconds: LiveData<Int> = _dailyLimitSeconds
-
-    data class DeviceMetadata(
-        val deviceId: String = "",
-        val sessionId: String = "",
-        val name: String = "",
-        val timestamp: Long = 0L,
-        val role: String = "receiver" // "monitor" or "receiver"
-    )
-
-    data class SessionRecord(
-        val sessionId: String = "",
-        val deviceName: String = "",
-        val timestamp: Long = 0L,
-        val connectedDevices: List<String> = emptyList() // format: "id:name"
-    )
 
     data class ViewerInfo(
         val deviceId: String,
@@ -168,6 +159,8 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
 
         setupFirestoreListeners()
         loadDailyLimit()
+        observeLocalActivities()
+        observeLocalDevices()
 
         // Listen for all online monitors to enable stable reconnection
         FirebaseDatabase.getInstance().getReference("monitors").addValueEventListener(object : ValueEventListener {
@@ -198,7 +191,6 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
 
                     // Save session record and device only when someone actually connects
                     sessionId.value?.let { sid ->
-                        saveSessionRecord(sid)
                         val name = deviceName.value ?: "${Build.MANUFACTURER} ${Build.MODEL}"
                         saveDevice("monitor_$sid", sid, name, "monitor")
                     }
@@ -293,37 +285,37 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         settingsPrefs.edit().putString("my_device_name", newName).apply()
     }
 
-    private fun setupFirestoreListeners() {
-        val uid = auth.currentUser?.uid ?: return
+    fun logActivity(title: String, subtitle: String, iconType: String) {
+        val now = System.currentTimeMillis()
+        // Debounce: Ignore identical logs within 3 seconds to prevent UI spam
+        if (lastLoggedActivity?.first == title && lastLoggedActivity?.second == subtitle && (now - lastLogTimestamp) < 3000) {
+            return
+        }
+        lastLoggedActivity = title to subtitle
+        lastLogTimestamp = now
 
-        // 1. Connected Cameras (Other Saved Devices)
-        connectedCamerasListener = firestore.collection("users").document(uid)
-            .collection("ConnectedCameras")
-            .orderBy("timestamp", Query.Direction.DESCENDING)
-            .addSnapshotListener { snapshot, e ->
-                if (e != null) return@addSnapshotListener
-                val devices = snapshot?.toObjects(DeviceMetadata::class.java) ?: emptyList()
+        val id = UUID.randomUUID().toString()
+        val activity = CameraActivity(id, title, subtitle, now, iconType)
+        viewModelScope.launch(Dispatchers.IO) {
+            cameraActivityDao.insert(activity)
+            Log.d(tag, "Activity logged to Room: $title")
+        }
+    }
+
+    private fun observeLocalActivities() {
+        viewModelScope.launch {
+            cameraActivityDao.getAllActivities().collect { activities ->
+                _cameraActivities.postValue(activities)
+            }
+        }
+    }
+
+    private fun observeLocalDevices() {
+        viewModelScope.launch {
+            pairedDeviceDao.getAllPairedDevices().collect { devices ->
                 _savedDevices.postValue(devices)
             }
-
-        // 2. Monitor Cameras (Recent Sessions)
-        monitorCamerasListener = firestore.collection("users").document(uid)
-            .collection("MonitorCameras")
-            .orderBy("timestamp", Query.Direction.DESCENDING)
-            .addSnapshotListener { snapshot, e ->
-                if (e != null) return@addSnapshotListener
-                val sessions = snapshot?.toObjects(SessionRecord::class.java) ?: emptyList()
-                _myCreatedSessions.postValue(sessions)
-            }
-
-        // 3. IP Cameras (Room Devices)
-        ipCamerasListener = firestore.collection("users").document(uid)
-            .collection("IPCameras")
-            .addSnapshotListener { snapshot, e ->
-                if (e != null) return@addSnapshotListener
-                val devices = snapshot?.toObjects(Device::class.java) ?: emptyList()
-                _roomDevices.postValue(devices)
-            }
+        }
     }
 
     fun saveRoomDevice(device: Device) {
@@ -446,11 +438,11 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     fun saveDevice(deviceId: String, sessionId: String, name: String, role: String = "receiver") {
-        val uid = auth.currentUser?.uid ?: return
-        val device = DeviceMetadata(deviceId, sessionId, name, System.currentTimeMillis(), role)
-        firestore.collection("users").document(uid)
-            .collection("ConnectedCameras").document(deviceId)
-            .set(device)
+        val device = PairedDevice(deviceId, sessionId, name, System.currentTimeMillis(), role)
+        viewModelScope.launch(Dispatchers.IO) {
+            pairedDeviceDao.insert(device)
+            Log.d(tag, "Device saved to Room: $name")
+        }
     }
 
     fun fetchAndSaveDeviceMetadata(sessionId: String, role: String = "receiver") {
@@ -466,30 +458,17 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     fun deleteSavedDevice(deviceId: String) {
-        val uid = auth.currentUser?.uid ?: return
-        firestore.collection("users").document(uid)
-            .collection("ConnectedCameras").document(deviceId)
-            .delete()
+        viewModelScope.launch(Dispatchers.IO) {
+            pairedDeviceDao.deleteById(deviceId)
+        }
     }
 
     fun takeScreenshot(context: android.content.Context, isLocal: Boolean = true): String? {
-        return webRTCManager.takeScreenshot(context, isLocal)
-    }
-
-    private fun saveSessionRecord(sessionId: String) {
-        val uid = auth.currentUser?.uid ?: return
-        val name = deviceName.value ?: ""
-        val record = SessionRecord(sessionId, name, System.currentTimeMillis())
-        firestore.collection("users").document(uid)
-            .collection("MonitorCameras").document(sessionId)
-            .set(record)
-    }
-
-    fun deleteSessionRecord(sessionId: String) {
-        val uid = auth.currentUser?.uid ?: return
-        firestore.collection("users").document(uid)
-            .collection("MonitorCameras").document(sessionId)
-            .delete()
+        val path = webRTCManager.takeScreenshot(context, isLocal)
+        if (path != null) {
+            logActivity("Screenshot Taken", File(path).name, "image")
+        }
+        return path
     }
 
     fun resumeHostSession(sid: String) {
@@ -501,35 +480,49 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         listenForViewers(sid)
     }
 
+    private val activeViewerIds = mutableSetOf<String>()
+
     fun listenForViewers(sid: String) {
         FirebaseDatabase.getInstance().getReference("sessions/$sid/viewers")
             .addValueEventListener(object : ValueEventListener {
                 override fun onDataChange(snapshot: DataSnapshot) {
                     val viewers = mutableListOf<ViewerInfo>()
+                    val newIds = mutableSetOf<String>()
+
                     for (child in snapshot.children) {
                         val status = child.child("status").getValue(String::class.java) ?: "Online"
-                        // Only show viewers that are currently Online
                         if (status == "Online") {
                             val dId = child.child("deviceId").getValue(String::class.java) ?: child.key ?: ""
                             val name = child.child("name").getValue(String::class.java) ?: "Unknown"
                             viewers.add(ViewerInfo(dId, name, status))
+                            newIds.add(dId)
 
-                            // Map this device to the session locally
-                            updateSessionWithViewer(sid, dId, name)
+                            val logKey = "${sid}_${dId}"
+                            if (!loggedViewerSessions.contains(logKey)) {
+                                logActivity("Monitor Connected", name, "monitor_connect")
+                                loggedViewerSessions.add(logKey)
+                                activeViewerIds.add(dId)
+                            }
                         }
                     }
+
+                    // Log disconnections based on activeViewerIds set to prevent duplicate logs from stale LiveData
+                    val iterator = activeViewerIds.iterator()
+                    while (iterator.hasNext()) {
+                        val oldId = iterator.next()
+                        if (!newIds.contains(oldId)) {
+                            // Find name from previous state or default
+                            val oldName = _connectedViewers.value?.find { it.deviceId == oldId }?.name ?: "Unknown Monitor"
+                            logActivity("Monitor Disconnected", oldName, "monitor_disconnect")
+                            loggedViewerSessions.remove("${sid}_${oldId}")
+                            iterator.remove()
+                        }
+                    }
+
                     _connectedViewers.postValue(viewers)
                 }
                 override fun onCancelled(error: DatabaseError) {}
             })
-    }
-
-    private fun updateSessionWithViewer(sid: String, viewerDeviceId: String, viewerName: String) {
-        val uid = auth.currentUser?.uid ?: return
-        val entry = "$viewerDeviceId:$viewerName"
-        firestore.collection("users").document(uid)
-            .collection("MonitorCameras").document(sid)
-            .update("connectedDevices", FieldValue.arrayUnion(entry))
     }
 
     private fun generateQrCode(content: String) {
@@ -573,6 +566,8 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         val sessionToUse = sessionId.value ?: return
         val name = deviceName.value ?: "${Build.MANUFACTURER} ${Build.MODEL}"
         val dId = myDeviceId.value ?: ""
+
+        logActivity("Camera Started", name, "camera_start")
 
         /*// Ensure we are marked as Live when starting streaming if not already done via resumeHostSession
         val ref = FirebaseDatabase.getInstance().getReference("SaveSessions/$dId")
@@ -620,6 +615,8 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         viewerRef.setValue(viewerData)
         viewerRef.onDisconnect().removeValue()
 
+        logActivity("Monitor Connected", "This device ($name)", "monitor_connect")
+
         webRTCManager.connectAsViewer(sessionId, remoteSink, dId)
     }
 
@@ -634,11 +631,15 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
 
     fun stopViewing(sink: VideoSink? = null) {
         sink?.let { webRTCManager.removeRemoteSink(it) }
+        val name = deviceName.value ?: "This device"
+        logActivity("Monitor Stopped", name, "monitor_disconnect")
         stop()
     }
 
     fun stopStreaming(sink: VideoSink? = null) {
         sink?.let { webRTCManager.removeLocalSink(it) }
+        val name = deviceName.value ?: "This device"
+        logActivity("Camera Stopped", name, "camera_stop")
         stop()
     }
 
@@ -652,6 +653,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                 .child(sid)
                 .removeValue()
         }
+        
         webRTCManager.release()
     }
 
@@ -693,6 +695,9 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         try {
             path = rm.stopRecording()
             Log.d(tag, "Recording stopped, saved to: $path")
+            
+            val fileName = path?.let { File(it).name } ?: "Video clip"
+            logActivity("Video recorded", fileName, "video_record")
         } catch (e: Exception) {
             Log.e(tag, "stopRecording error: ${e.message}")
         }
@@ -777,8 +782,23 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         }, 2000)
     }
 
+    private fun setupFirestoreListeners() {
+        val uid = auth.currentUser?.uid ?: return
+        ipCamerasListener = firestore.collection("users").document(uid)
+            .collection("IPCameras")
+            .addSnapshotListener { snapshot, error ->
+                if (error != null) {
+                    Log.e(tag, "Firestore listen error: ${error.message}")
+                    return@addSnapshotListener
+                }
+                val devices = snapshot?.toObjects(Device::class.java) ?: emptyList()
+                _roomDevices.postValue(devices)
+            }
+    }
+
     override fun onCleared() {
         super.onCleared()
+        ipCamerasListener?.remove()
         stopAll()
     }
 }
