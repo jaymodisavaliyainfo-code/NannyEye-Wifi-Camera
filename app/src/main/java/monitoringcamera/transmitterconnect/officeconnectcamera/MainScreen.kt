@@ -268,10 +268,12 @@ fun DashboardContent(
     val onlineMonitors by viewModel.onlineMonitors.observeAsState(emptyMap())
     val myDeviceId by viewModel.myDeviceId.observeAsState("")
     val isConnected by viewModel.isConnected.observeAsState(false)
+    val isBroadcasting by viewModel.isBroadcasting.observeAsState(false)
     val isRemoteConnected by viewModel.isRemoteConnected.observeAsState(false)
     val sessionId by viewModel.sessionId.observeAsState("")
     val qrBitmap by viewModel.qrBitmap.observeAsState()
     val cameraActivities by viewModel.cameraActivities.observeAsState(emptyList())
+    val connectedViewers by viewModel.connectedViewers.observeAsState(emptyList())
 
     val activePreviewSessionId by viewModel.activePreviewSessionId.observeAsState(null)
     val activePreviewDeviceName by viewModel.activePreviewDeviceName.observeAsState("")
@@ -433,15 +435,24 @@ fun DashboardContent(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.spacedBy(16.dp)
         ) {
-            val onlineCount = savedDevices.count { device ->
-                val onlineInfo = onlineMonitors[device.deviceId]
-                onlineInfo != null && onlineInfo.sessionId == device.sessionId
+            val onlineCount = if (isBroadcasting) {
+                connectedViewers.size
+            } else {
+                savedDevices.count { device ->
+                    val onlineInfo = onlineMonitors[device.deviceId]
+                    onlineInfo != null && onlineInfo.sessionId == device.sessionId
+                }
             }
+
             StatCard(
-                title = "CAMERAS\nONLINE",
+                title = if (isBroadcasting) "VIEWERS\nONLINE" else "CAMERAS\nONLINE",
                 count = onlineCount.toString(),
-                subtitle = if (onlineCount == 0) "No streams active" else "$onlineCount active",
-                icon = Icons.Default.Videocam,
+                subtitle = if (isBroadcasting) {
+                    if (onlineCount == 0) "No one watching" else "$onlineCount active"
+                } else {
+                    if (onlineCount == 0) "No streams active" else "$onlineCount active"
+                },
+                icon = if (isBroadcasting) Icons.Default.Person else Icons.Default.Videocam,
                 modifier = Modifier.weight(1f)
             )
             StatCard(
@@ -569,7 +580,9 @@ fun DashboardContent(
                         checkAndRequestPermissions("start_broadcasting")
                     },
                     onCardClick = {
-                        navController.navigate("camera_view/${Uri.encode(sessionId)}")
+                        if (isConnected) {
+                            navController.navigate("camera_view/${Uri.encode(sessionId)}")
+                        }
                     }
                 )
             }
@@ -583,7 +596,9 @@ fun DashboardContent(
                             viewModel.activePreviewSessionId.value = null
                             viewModel.stopRemotePreview()
                         },
-                        onClick = { navController.navigate("viewer/${Uri.encode(sid)}") }
+                        onClick = {
+                            navController.navigate("viewer/${Uri.encode(sid)}")
+                        }
                     )
                 }
             }
@@ -625,20 +640,39 @@ fun DashboardContent(
             shape = RoundedCornerShape(24.dp),
             colors = CardDefaults.cardColors(containerColor = Color(0xFF1B1F25))
         ) {
-            savedDevices.take(3).forEach { device ->
-                val isLive = onlineMonitors[device.deviceId]?.sessionId == device.sessionId
-                DeviceRowItem(
-                    name = device.name,
-                    timestamp = device.timestamp,
-                    status = if (isLive) "ONLINE" else "OFFLINE",
-                    onActivate = {
-                        if (isLive) {
-                            navController.navigate("viewer/${Uri.encode(device.sessionId)}")
-                        } else {
-                            // Handle offline device connection request
+            // Show the 3 most recent peer devices regardless of current session state
+            // to ensure both Camera and Monitor devices can see their history.
+            if (savedDevices.isEmpty()) {
+                Box(
+                    modifier = Modifier.fillMaxWidth().padding(24.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text(
+                        text = "No remote devices added yet",
+                        color = Color.Gray,
+                        fontSize = 14.sp
+                    )
+                }
+            } else {
+                savedDevices.take(3).forEach { device ->
+                    val isLive = onlineMonitors[device.deviceId]?.sessionId == device.sessionId
+                    DeviceRowItem(
+                        name = device.name,
+                        timestamp = device.timestamp,
+                        status = if (isLive) "ONLINE" else "OFFLINE",
+                        onActivate = {
+                            if (isLive) {
+                                // If it's a camera we joined, navigate to viewer
+                                // If it's a viewer that joined us, navigate to camera view
+                                if (device.role == "camera") {
+                                    navController.navigate("viewer/${Uri.encode(device.sessionId)}")
+                                } else {
+                                    navController.navigate("camera_view/${Uri.encode(device.sessionId)}")
+                                }
+                            }
                         }
-                    }
-                )
+                    )
+                }
             }
         }
 
@@ -669,20 +703,47 @@ fun DashboardContent(
         Spacer(modifier = Modifier.height(16.dp))
 
         if (cameraActivities.isEmpty()) {
-            Text(
-                text = "No recent activity",
-                color = Color(0xFF9CA3AF),
-                fontSize = 12.sp,
-                modifier = Modifier.padding(vertical = 16.dp)
-            )
-        } else {
-            cameraActivities.take(5).forEach { activity ->
-                ActivityItem(
-                    title = activity.title,
-                    subtitle = activity.subtitle,
-                    time = formatActivityTime(activity.timestamp),
-                    iconType = activity.iconType
+            Box(
+                modifier = Modifier.fillMaxWidth().padding(24.dp),
+                contentAlignment = Alignment.Center
+            ) {
+                Text(
+                    text = "No recent activity",
+                    color = Color.Gray,
+                    fontSize = 14.sp
                 )
+            }
+        } else {
+            val targetRole = remember(sessionId, isBroadcasting, cameraActivities) {
+                if (sessionId.isNotEmpty()) {
+                    if (isBroadcasting) "camera" else "monitor"
+                } else {
+                    // Default to the role of the most recent activity if sitting on dashboard
+                    cameraActivities.firstOrNull()?.role ?: "monitor"
+                }
+            }
+            val filteredActivities = cameraActivities.filter { it.role == targetRole }
+
+            if (filteredActivities.isEmpty()) {
+                Box(
+                    modifier = Modifier.fillMaxWidth().padding(24.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text(
+                        text = "No activity recorded for this mode",
+                        color = Color.Gray,
+                        fontSize = 14.sp
+                    )
+                }
+            } else {
+                filteredActivities.take(5).forEach { activity ->
+                    ActivityItem(
+                        title = activity.title,
+                        subtitle = activity.subtitle,
+                        time = formatActivityTime(activity.timestamp),
+                        iconType = activity.iconType
+                    )
+                }
             }
         }
 
@@ -731,7 +792,10 @@ fun DashboardContent(
             onDismiss = { showManualPairingDialog = false },
             onConnect = { sessionId: String ->
                 showManualPairingDialog = false
-                navController.navigate("viewer/${Uri.encode(sessionId)}")
+                // Set the session ID to show the preview card on dashboard
+                viewModel.activePreviewSessionId.value = sessionId
+                viewModel.activePreviewDeviceName.value = "Remote Camera"
+                viewModel.fetchAndSaveDeviceMetadata(sessionId)
             }
         )
     }
@@ -969,7 +1033,7 @@ fun ThisDeviceCard(
     Card(
         modifier = Modifier
             .size(width = cardWidth, height = cardHeight)
-            .clickable(enabled = isBroadcasting) { onCardClick() },
+            .clickable(enabled = isBroadcasting && isConnected) { onCardClick() },
         shape = RoundedCornerShape(24.dp),
         colors = CardDefaults.cardColors(containerColor = Color(0xFF161B22))
     ) {
@@ -977,7 +1041,13 @@ fun ThisDeviceCard(
             Box(modifier = Modifier.fillMaxSize()) {
                 var localSink by remember { mutableStateOf<VideoSink?>(null) }
 
-                LaunchedEffect(localSink) {
+                DisposableEffect(sessionId) {
+                    onDispose {
+                        localSink?.let { viewModel.removeLocalSink(it) }
+                    }
+                }
+
+                LaunchedEffect(localSink, sessionId) {
                     localSink?.let { sink ->
                         viewModel.startStreaming(sink, false, sessionId)
                     }
@@ -991,7 +1061,7 @@ fun ThisDeviceCard(
                                 ViewGroup.LayoutParams.MATCH_PARENT,
                                 ViewGroup.LayoutParams.MATCH_PARENT
                             )
-                            viewModel.initRenderer(this)
+                            viewModel.initRenderer(this, isLocal = true)
                             localSink = this
                         }
                     },
@@ -1225,7 +1295,13 @@ fun RemoteDeviceCard(
         Box(modifier = Modifier.fillMaxSize()) {
             var remoteSink by remember { mutableStateOf<VideoSink?>(null) }
 
-            LaunchedEffect(remoteSink) {
+            DisposableEffect(sessionId) {
+                onDispose {
+                    remoteSink?.let { viewModel.removeRemoteSink(it) }
+                }
+            }
+
+            LaunchedEffect(remoteSink, sessionId) {
                 remoteSink?.let { sink ->
                     viewModel.startRemotePreview(sessionId, sink)
                 }
@@ -1239,7 +1315,7 @@ fun RemoteDeviceCard(
                             ViewGroup.LayoutParams.MATCH_PARENT,
                             ViewGroup.LayoutParams.MATCH_PARENT
                         )
-                        viewModel.initRenderer(this, true)
+                        viewModel.initRenderer(this, isLocal = false)
                         remoteSink = this
                     }
                 },
@@ -1704,7 +1780,7 @@ fun RecentSessionItem(
                                             val saveData = mapOf("status" to "Online")
                                             ref.setValue(saveData)
                                             ref.onDisconnect().removeValue()
-                                            viewModel.ViewerDeviceId.value = connectedDeviceId
+                                            viewModel.viewerDeviceId.value = connectedDeviceId
                                             viewModel.resumeHostSession(session.sessionId)
                                             navController.navigate("camera_view/${Uri.encode(session.sessionId)}")
                                         }
@@ -2204,7 +2280,7 @@ fun StreamItem(
                                                     val saveData = mapOf("status" to "Online")
                                                     ref.setValue(saveData)
                                                     ref.onDisconnect().removeValue()
-                                                    cameraViewModel?.ViewerDeviceId?.value =
+                                                    cameraViewModel?.viewerDeviceId?.value =
                                                         deviceId
 
                                                     navController.navigate(
@@ -2290,7 +2366,7 @@ fun StreamItem(
                             val saveData = mapOf("status" to "Online")
                             ref.setValue(saveData)
                             ref.onDisconnect().removeValue()
-                            cameraViewModel?.ViewerDeviceId?.value = deviceId
+                            cameraViewModel?.viewerDeviceId?.value = deviceId
                             navController.navigate("viewer/${Uri.encode(sessionId)}")
                         } else {
                             showConnectDialog = false
@@ -4757,6 +4833,17 @@ fun AllActivitiesScreen(
     viewModel: CameraViewModel
 ) {
     val cameraActivities by viewModel.cameraActivities.observeAsState(emptyList())
+    val sessionId by viewModel.sessionId.observeAsState("")
+    val isBroadcasting by viewModel.isBroadcasting.observeAsState(false)
+
+    val targetRole = remember(sessionId, isBroadcasting, cameraActivities) {
+        if (sessionId.isNotEmpty()) {
+            if (isBroadcasting) "camera" else "monitor"
+        } else {
+            cameraActivities.firstOrNull()?.role ?: "monitor"
+        }
+    }
+    val filteredActivities = cameraActivities.filter { it.role == targetRole }
 
     Scaffold(
         topBar = {
@@ -4786,14 +4873,14 @@ fun AllActivitiesScreen(
         },
         containerColor = Color(0xFF0E1116)
     ) { padding ->
-        if (cameraActivities.isEmpty()) {
+        if (filteredActivities.isEmpty()) {
             Box(
                 modifier = Modifier
                     .fillMaxSize()
                     .padding(padding),
                 contentAlignment = Alignment.Center
             ) {
-                Text(text = "No activity recorded yet", color = Color(0xFF9CA3AF))
+                Text(text = "No activity recorded for this mode", color = Color(0xFF9CA3AF))
             }
         } else {
             LazyColumn(
@@ -4803,7 +4890,7 @@ fun AllActivitiesScreen(
                     .padding(horizontal = 16.dp),
                 verticalArrangement = Arrangement.spacedBy(8.dp)
             ) {
-                items(cameraActivities) { activity ->
+                items(filteredActivities) { activity ->
                     ActivityItem(
                         title = activity.title,
                         subtitle = activity.subtitle,
@@ -5197,7 +5284,7 @@ fun ManualPairingDialog(
 @Composable
 fun AllDevicesScreen(
     onBack: () -> Unit,
-    onActivate: (String) -> Unit,
+    onActivate: (String, String) -> Unit, // Added role parameter
     viewModel: CameraViewModel
 ) {
     val savedDevices by viewModel.savedDevices.observeAsState(emptyList())
@@ -5231,25 +5318,34 @@ fun AllDevicesScreen(
         },
         containerColor = Color(0xFF0E1116)
     ) { padding ->
-        LazyColumn(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(padding)
-                .padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp)
-        ) {
-            items(savedDevices) { device ->
-                val isLive = onlineMonitors[device.deviceId]?.sessionId == device.sessionId
-                DeviceRowItem(
-                    name = device.name,
-                    timestamp = device.timestamp,
-                    status = if (isLive) "ONLINE" else "OFFLINE",
-                    onActivate = {
-                        if (isLive) {
-                            onActivate(device.sessionId)
+        if (savedDevices.isEmpty()) {
+            Box(
+                modifier = Modifier.fillMaxSize().padding(padding),
+                contentAlignment = Alignment.Center
+            ) {
+                Text(text = "No remote devices joined yet", color = Color.Gray)
+            }
+        } else {
+            LazyColumn(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(padding)
+                    .padding(16.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                items(savedDevices) { device ->
+                    val isLive = onlineMonitors[device.deviceId]?.sessionId == device.sessionId
+                    DeviceRowItem(
+                        name = device.name,
+                        timestamp = device.timestamp,
+                        status = if (isLive) "ONLINE" else "OFFLINE",
+                        onActivate = {
+                            if (isLive) {
+                                onActivate(device.sessionId, device.role)
+                            }
                         }
-                    }
-                )
+                    )
+                }
             }
         }
     }

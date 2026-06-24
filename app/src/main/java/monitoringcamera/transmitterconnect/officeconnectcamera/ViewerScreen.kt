@@ -102,10 +102,16 @@ fun ViewerScreen(sessionId: String, onBack: () -> Unit, viewModel: CameraViewMod
     }
 
     // Start WebRTC Viewing
-    LaunchedEffect(remoteSink) {
+    LaunchedEffect(remoteSink, sessionId) {
         val sink = remoteSink
         if (sink != null) {
             viewModel.startViewing(sessionId, sink)
+        }
+    }
+
+    DisposableEffect(sessionId) {
+        onDispose {
+            remoteSink?.let { viewModel.removeRemoteSink(it) }
         }
     }
 
@@ -117,7 +123,6 @@ fun ViewerScreen(sessionId: String, onBack: () -> Unit, viewModel: CameraViewMod
         onDispose {
             audioManager.isSpeakerphoneOn = originalSpeaker
             audioManager.mode = originalMode
-            viewModel.stopAll()
         }
     }
 
@@ -144,7 +149,7 @@ fun ViewerScreen(sessionId: String, onBack: () -> Unit, viewModel: CameraViewMod
                         ViewGroup.LayoutParams.MATCH_PARENT,
                         ViewGroup.LayoutParams.MATCH_PARENT
                     )
-                    viewModel.initRenderer(this, isLocal = true)
+                    viewModel.initRenderer(this, isLocal = false)
                     remoteSink = this
                 }
             },

@@ -18,7 +18,9 @@ class WebRTCManager(private val context: Context) {
     private val STUN_SERVER = "stun:stun.l.google.com:19302"
 
     private val database = FirebaseDatabase.getInstance()
-    private var peerConnection: PeerConnection? = null
+    private var peerConnection: PeerConnection? = null // For Viewer
+    private val viewerPeerConnections = mutableMapOf<String, PeerConnection>() // For Broadcaster (viewerId -> PC)
+    
     private var localVideoTrack: VideoTrack? = null
     private var localAudioTrack: AudioTrack? = null
     private var localMediaStream: MediaStream? = null  // FIX B: Plan B uses addStream
@@ -30,12 +32,16 @@ class WebRTCManager(private val context: Context) {
     private var remoteVideoTrack: VideoTrack? = null
     private var currentSessionId: String? = null
     private var currentCameraId: String? = null
-    private var currentViewerDeviceId: String? = null
+    private var currentViewerDeviceId: String? = null // For Viewer: self, For Broadcaster: latest joined
     private var localBroadcasterDeviceId: String? = null
     private var viewersRef: DatabaseReference? = null
     private var viewersListener: ValueEventListener? = null
 
-    private val pendingCandidates = mutableListOf<IceCandidate>()
+    private val pendingCandidates = mutableListOf<IceCandidate>() // For Viewer
+    private val viewerPendingCandidates = mutableMapOf<String, MutableList<IceCandidate>>() // For Broadcaster
+
+    private val viewerAnswerListeners = mutableMapOf<String, ValueEventListener>()
+    private val viewerCandidatesListeners = mutableMapOf<String, ChildEventListener>()
 
     private val _connectionState = MutableLiveData(false)
     val connectionState: LiveData<Boolean> get() = _connectionState
@@ -126,16 +132,17 @@ class WebRTCManager(private val context: Context) {
     }
 
     fun startCameraAndOffer(sessionId: String, deviceId: String, localSink: VideoSink?, isAudioOnly: Boolean, deviceName: String, callback: OfferCallback) {
-        if (currentSessionId == sessionId && peerConnection != null) {
+        if (currentSessionId == sessionId && isBroadcaster && !isReleased) {
             localSink?.let { localVideoTrack?.addSink(it) }
             return
         }
-        if (peerConnection != null) {
-            release()
-        }
+        
+        release()
+        
         currentSessionId = sessionId
         localBroadcasterDeviceId = deviceId
         isBroadcaster = true
+        isReleased = false
         listenForSessionStatus(sessionId)
 
         // Add metadata for the session
@@ -156,81 +163,69 @@ class WebRTCManager(private val context: Context) {
         registryRef.child("lastSeen").setValue(ServerValue.TIMESTAMP)
         registryRef.onDisconnect().removeValue()
 
-        // FIX 4 (Android duplicate PC): The original code called createPeerConnection()
-        // TWICE — once inside a viewer-join listener and once unconditionally below.
-        // This caused the offer to be made on a PC with no media tracks, producing a
-        // malformed offer that iOS rejects. The viewer-join listener block is also
-        // redundant because iOS broadcaster already waits for the viewer via its own
-        // Firebase observer before making an offer.
-        //
-        // Correct flow: create PC once → add media → wait for viewer → create offer.
-        // The viewer-join listener is kept only to update currentViewerDeviceId; it
-        // must NOT create another PC since one already exists.
-
-        var viewerJoinListener: ValueEventListener? = null
-        val viewerRef = FirebaseDatabase.getInstance().getReference("sessions/$sessionId/viewers")
-        viewerJoinListener = object : ValueEventListener {
+        // Multi-viewer support: Listen for all viewers joining
+        viewersRef = database.getReference("sessions/$sessionId/viewers")
+        viewersListener = object : ValueEventListener {
             override fun onDataChange(snapshot: DataSnapshot) {
-                if (snapshot.childrenCount > 0) {
-                    val viewer = snapshot.children.first()
-                    currentViewerDeviceId = viewer.key
-                    Log.d(TAG, "🔥 Viewer joined: $currentViewerDeviceId")
-                    // PC already exists — just track the viewer ID, do NOT create another PC
+                for (child in snapshot.children) {
+                    val viewerId = child.key ?: continue
+                    val status = child.child("status").getValue(String::class.java)
+                    if (status == "Online" && !viewerPeerConnections.containsKey(viewerId)) {
+                        Log.d(TAG, "🔥 New Viewer joined: $viewerId")
+                        currentViewerDeviceId = viewerId
+                        initiateConnectionToViewer(sessionId, viewerId, isAudioOnly)
+                    }
                 }
             }
             override fun onCancelled(error: DatabaseError) {}
         }
-        viewerRef.addValueEventListener(viewerJoinListener)
+        viewersRef?.addValueEventListener(viewersListener!!)
 
-        // Single authoritative PC creation — with media tracks attached BEFORE offer
-        createPeerConnection(sessionId, true)
         startMedia(localSink, isAudioOnly)
+    }
 
-        // FIX C (offer before capturer ready): videoCapturer?.startCapture() is async.
-        // Calling createOffer immediately after gives the SDK no time to initialize
-        // the camera pipeline. The video track exists in the SDP but has no SSRC/
-        // encoding parameters filled in properly, so iOS receives an offer where the
-        // video section appears valid but produces no decodable frames.
-        // A 300ms delay is enough for CameraX/Camera2 to open the device and start
-        // the capture pipeline. This is safe because Firebase listeners are attached
-        // after the offer is written anyway.
+    private fun initiateConnectionToViewer(sessionId: String, viewerId: String, isAudioOnly: Boolean) {
+        val pc = createPeerConnection(sessionId, true, viewerId) ?: return
+        viewerPeerConnections[viewerId] = pc
+        
+        localMediaStream?.let { pc.addStream(it) }
+        
+        // Delay to allow camera pipeline to start if this is the first viewer
         val handler = android.os.Handler(android.os.Looper.getMainLooper())
         handler.postDelayed({
-            if (peerConnection == null || isReleased) return@postDelayed
+            if (isReleased || !viewerPeerConnections.containsKey(viewerId)) return@postDelayed
 
             val constraints = MediaConstraints()
             constraints.mandatory.add(MediaConstraints.KeyValuePair("OfferToReceiveVideo", if (isAudioOnly) "false" else "true"))
             constraints.mandatory.add(MediaConstraints.KeyValuePair("OfferToReceiveAudio", "true"))
 
-            peerConnection?.createOffer(object : SimpleSdpObserver() {
+            pc.createOffer(object : SimpleSdpObserver() {
                 override fun onCreateSuccess(sdp: SessionDescription) {
-                    peerConnection?.setLocalDescription(object : SimpleSdpObserver() {
+                    pc.setLocalDescription(object : SimpleSdpObserver() {
                         override fun onSetSuccess() {
-                            writeOfferToFirebase(sessionId, sdp)
-                            listenForAnswer(sessionId)
-                            listenForRemoteCandidates(sessionId, true)
-                            callback.onOfferCreated(sdp.description)
+                            writeOfferToFirebase(sessionId, sdp, viewerId)
+                            listenForAnswer(sessionId, viewerId)
+                            listenForRemoteCandidates(sessionId, true, viewerId)
                         }
                     }, sdp)
                 }
                 override fun onCreateFailure(error: String?) {
-                    Log.e(TAG, "❌ createOffer failed: $error")
+                    Log.e(TAG, "❌ createOffer failed for $viewerId: $error")
                 }
             }, constraints)
-        }, 300L)
+        }, 500L)
+    }
+
+    private fun updateOverallConnectionState() {
+        val connected = viewerPeerConnections.values.any { pc ->
+            val state = pc.iceConnectionState()
+            state == PeerConnection.IceConnectionState.CONNECTED || state == PeerConnection.IceConnectionState.COMPLETED
+        }
+        _connectionState.postValue(connected)
     }
 
     private fun startMedia(sink: VideoSink?, isAudioOnly: Boolean) {
-        // FIX B (no video in offer): peerConnection?.addTrack() is Unified Plan API.
-        // This PC is configured as PLAN_B. In Plan B the correct API is addStream().
-        // addTrack() on a Plan B PC is silently ignored — the track is never included
-        // in the offer SDP, so iOS receives an offer with no usable video section.
-        //
-        // Correct Plan B flow:
-        //   1. Create a MediaStream
-        //   2. Add tracks to the stream
-        //   3. Call pc.addStream(stream)
-        localMediaStream = staticFactory?.createLocalMediaStream("stream0")
+        localMediaStream = staticFactory?.createLocalMediaStream(if (isBroadcaster) "stream0" else "stream_viewer")
         val localStream = localMediaStream
 
         if (!isAudioOnly) {
@@ -242,16 +237,18 @@ class WebRTCManager(private val context: Context) {
 
             localVideoTrack = staticFactory?.createVideoTrack("video0", videoSource)
             sink?.let { localVideoTrack?.addSink(it) }
-            localVideoTrack?.let { localStream?.addTrack(it) }  // ← add to stream, not PC directly
+            localVideoTrack?.let { localStream?.addTrack(it) }
         }
 
         audioSource = staticFactory?.createAudioSource(MediaConstraints())
         localAudioTrack = staticFactory?.createAudioTrack("audio0", audioSource)
-        localAudioTrack?.let { localStream?.addTrack(it) }  // ← add to stream, not PC directly
+        localAudioTrack?.let { localStream?.addTrack(it) }
 
-        // Add the complete stream to the PC in one call (Plan B API)
-        localStream?.let { peerConnection?.addStream(it) }
-        Log.d(TAG, "📡 Stream added to PC: video=${localVideoTrack != null}, audio=${localAudioTrack != null}")
+        // For Viewer role, add stream to PC immediately
+        if (!isBroadcaster) {
+            localStream?.let { peerConnection?.addStream(it) }
+        }
+        Log.d(TAG, "📡 Media started: video=${localVideoTrack != null}, audio=${localAudioTrack != null}")
     }
 
     fun suspendCamera() {
@@ -361,8 +358,8 @@ class WebRTCManager(private val context: Context) {
         this.remoteVideoSink = remoteSink
 
         // Viewer should only remove their contribution on abrupt disconnect
-        database.getReference("sessions/$sessionId/answer").onDisconnect().removeValue()
-        database.getReference("sessions/$sessionId/calleeCandidates").onDisconnect().removeValue()
+        database.getReference("sessions/$sessionId/viewers/$viewerDeviceId/answer").onDisconnect().removeValue()
+        database.getReference("sessions/$sessionId/viewers/$viewerDeviceId/calleeCandidates").onDisconnect().removeValue()
         
         // Track this viewer using Device ID
         val viewerName = "${android.os.Build.MANUFACTURER} ${android.os.Build.MODEL}"
@@ -385,10 +382,9 @@ class WebRTCManager(private val context: Context) {
             }
         }
 
-        createPeerConnection(sessionId, false)
+        peerConnection = createPeerConnection(sessionId, false, viewerDeviceId)
 
         // Push-to-talk support: Add local audio track but keep it disabled initially
-        // FIX B (viewer side): Must also use addStream (Plan B API), not addTrack.
         try {
             audioSource = staticFactory?.createAudioSource(MediaConstraints())
             localAudioTrack = staticFactory?.createAudioTrack("audio_viewer", audioSource)
@@ -401,13 +397,13 @@ class WebRTCManager(private val context: Context) {
             Log.e(TAG, "Error adding viewer audio track: ${e.message}")
         }
 
-        listenForOffer(sessionId)
-        listenForRemoteCandidates(sessionId, false)
+        listenForOffer(sessionId, viewerDeviceId)
+        listenForRemoteCandidates(sessionId, false, viewerDeviceId)
     }
 
-    private fun listenForOffer(sessionId: String) {
+    private fun listenForOffer(sessionId: String, viewerId: String) {
         cleanupOfferListener()
-        offerRef = database.getReference("sessions/$sessionId/offer")
+        offerRef = database.getReference("sessions/$sessionId/viewers/$viewerId/offer")
         offerListener = object : ValueEventListener {
             override fun onDataChange(snapshot: DataSnapshot) {
                 if (!snapshot.exists()) return
@@ -418,7 +414,7 @@ class WebRTCManager(private val context: Context) {
                     val offer = SessionDescription(SessionDescription.Type.fromCanonicalForm(type), sdp)
                     peerConnection?.setRemoteDescription(object : SimpleSdpObserver() {
                         override fun onSetSuccess() {
-                            createAnswer(sessionId)
+                            createAnswer(sessionId, viewerId)
                             drainPendingCandidates()
                         }
                     }, offer)
@@ -432,13 +428,7 @@ class WebRTCManager(private val context: Context) {
         offerRef?.addValueEventListener(offerListener!!)
     }
 
-    private fun cleanupOfferListener() {
-        offerListener?.let { offerRef?.removeEventListener(it) }
-        offerListener = null
-        offerRef = null
-    }
-
-    private fun createAnswer(sessionId: String) {
+    private fun createAnswer(sessionId: String, viewerId: String) {
         val constraints = MediaConstraints()
         constraints.mandatory.add(MediaConstraints.KeyValuePair("OfferToReceiveVideo", "true"))
         constraints.mandatory.add(MediaConstraints.KeyValuePair("OfferToReceiveAudio", "true"))
@@ -447,31 +437,36 @@ class WebRTCManager(private val context: Context) {
             override fun onCreateSuccess(sdp: SessionDescription) {
                 peerConnection?.setLocalDescription(object : SimpleSdpObserver() {
                     override fun onSetSuccess() {
-                        writeAnswerToFirebase(sessionId, sdp)
+                        writeAnswerToFirebase(sessionId, sdp, viewerId)
                     }
                 }, sdp)
             }
         }, constraints)
     }
 
-    private fun createPeerConnection(sessionId: String, isCaller: Boolean) {
-        peerConnection = staticFactory?.createPeerConnection(
+    private fun createPeerConnection(sessionId: String, isCaller: Boolean, viewerId: String): PeerConnection? {
+        return staticFactory?.createPeerConnection(
             buildRtcConfig(),
             object : PeerConnection.Observer {
                 override fun onIceCandidate(candidate: IceCandidate) {
                     if (isReleased) return
-                    sendCandidateToFirebase(sessionId, candidate, isCaller)
+                    sendCandidateToFirebase(sessionId, candidate, isCaller, viewerId)
                 }
 
                 override fun onIceConnectionChange(state: PeerConnection.IceConnectionState) {
                     if (isReleased) return
-                    Log.d(TAG, "ICE Connection State for $sessionId: $state")
-                    val connected = state == PeerConnection.IceConnectionState.CONNECTED ||
-                            state == PeerConnection.IceConnectionState.COMPLETED
-                    _connectionState.postValue(connected)
+                    Log.d(TAG, "ICE Connection State for $viewerId: $state")
+                    
+                    if (isBroadcaster) {
+                        updateOverallConnectionState()
+                    } else {
+                        val connected = state == PeerConnection.IceConnectionState.CONNECTED ||
+                                state == PeerConnection.IceConnectionState.COMPLETED
+                        _connectionState.postValue(connected)
+                    }
 
                     if (state == PeerConnection.IceConnectionState.DISCONNECTED || state == PeerConnection.IceConnectionState.FAILED) {
-                        Log.w(TAG, "ICE Disconnected or Failed for $sessionId - resetting flash if active")
+                        Log.w(TAG, "ICE Disconnected or Failed for $viewerId")
                     }
                 }
 
@@ -505,56 +500,98 @@ class WebRTCManager(private val context: Context) {
         )
     }
 
-    private fun writeOfferToFirebase(sessionId: String, sdp: SessionDescription) {
+    private fun writeOfferToFirebase(sessionId: String, sdp: SessionDescription, viewerId: String) {
         val data = HashMap<String, String>()
         data["type"] = sdp.type.canonicalForm()
         data["sdp"] = sdp.description
-        database.getReference("sessions/$sessionId/offer").setValue(data)
+        database.getReference("sessions/$sessionId/viewers/$viewerId/offer").setValue(data)
     }
 
-    private fun writeAnswerToFirebase(sessionId: String, sdp: SessionDescription) {
+    private fun writeAnswerToFirebase(sessionId: String, sdp: SessionDescription, viewerId: String) {
         val data = HashMap<String, String>()
         data["type"] = sdp.type.canonicalForm()
         data["sdp"] = sdp.description
-        database.getReference("sessions/$sessionId/answer").setValue(data)
+        database.getReference("sessions/$sessionId/viewers/$viewerId/answer").setValue(data)
     }
 
-    private fun listenForAnswer(sessionId: String) {
-        cleanupAnswerListener()
-        answerRef = database.getReference("sessions/$sessionId/answer")
-        answerListener = object : ValueEventListener {
+    private fun listenForAnswer(sessionId: String, viewerId: String) {
+        val ref = database.getReference("sessions/$sessionId/viewers/$viewerId/answer")
+        viewerAnswerListeners[viewerId]?.let { ref.removeEventListener(it) }
+        
+        val listener = object : ValueEventListener {
             override fun onDataChange(snapshot: DataSnapshot) {
                 if (!snapshot.exists()) return
                 val type = snapshot.child("type").getValue(String::class.java)
                 val sdp = snapshot.child("sdp").getValue(String::class.java)
-                if (type != null && sdp != null && peerConnection != null && peerConnection?.remoteDescription == null) {
+                val pc = viewerPeerConnections[viewerId]
+                if (type != null && sdp != null && pc != null && pc.remoteDescription == null) {
                     val answer = SessionDescription(SessionDescription.Type.fromCanonicalForm(type), sdp)
-                    peerConnection?.setRemoteDescription(object : SimpleSdpObserver() {
+                    pc.setRemoteDescription(object : SimpleSdpObserver() {
                         override fun onSetSuccess() {
-                            drainPendingCandidates()
+                            drainPendingCandidates(viewerId)
                         }
                     }, answer)
                 }
             }
-
             override fun onCancelled(error: DatabaseError) {}
         }
-        answerRef?.addValueEventListener(answerListener!!)
+        ref.addValueEventListener(listener)
+        viewerAnswerListeners[viewerId] = listener
     }
 
-    private fun cleanupAnswerListener() {
-        answerListener?.let { answerRef?.removeEventListener(it) }
-        answerListener = null
-        answerRef = null
-    }
-
-    private fun sendCandidateToFirebase(sessionId: String, candidate: IceCandidate, isCaller: Boolean) {
+    private fun sendCandidateToFirebase(sessionId: String, candidate: IceCandidate, isCaller: Boolean, viewerId: String) {
         val path = if (isCaller) "callerCandidates" else "calleeCandidates"
         val data = HashMap<String, Any>()
         data["candidate"] = candidate.sdp
         data["sdpMid"] = candidate.sdpMid
         data["sdpMLineIndex"] = candidate.sdpMLineIndex
-        database.getReference("sessions/$sessionId/$path").push().setValue(data)
+        database.getReference("sessions/$sessionId/viewers/$viewerId/$path").push().setValue(data)
+    }
+
+    private fun listenForRemoteCandidates(sessionId: String, isCaller: Boolean, viewerId: String) {
+        val path = if (isCaller) "calleeCandidates" else "callerCandidates"
+        val ref = database.getReference("sessions/$sessionId/viewers/$viewerId/$path")
+        
+        viewerCandidatesListeners[viewerId]?.let { ref.removeEventListener(it) }
+
+        val listener = object : ChildEventListener {
+            override fun onChildAdded(snapshot: DataSnapshot, previousChildName: String?) {
+                val candidateStr = snapshot.child("candidate").getValue(String::class.java)
+                val sdpMid = snapshot.child("sdpMid").getValue(String::class.java)
+                val sdpMLineIndex = snapshot.child("sdpMLineIndex").getValue(Int::class.java)
+                val pc = if (isBroadcaster) viewerPeerConnections[viewerId] else peerConnection
+                
+                if (candidateStr != null && sdpMid != null && sdpMLineIndex != null && pc != null) {
+                    val candidate = IceCandidate(sdpMid, sdpMLineIndex, candidateStr)
+                    if (pc.remoteDescription == null) {
+                        if (isBroadcaster) {
+                            viewerPendingCandidates.getOrPut(viewerId) { mutableListOf() }.add(candidate)
+                        } else {
+                            pendingCandidates.add(candidate)
+                        }
+                    } else {
+                        pc.addIceCandidate(candidate)
+                    }
+                }
+            }
+            override fun onChildChanged(snapshot: DataSnapshot, previousChildName: String?) {}
+            override fun onChildRemoved(snapshot: DataSnapshot) {}
+            override fun onChildMoved(snapshot: DataSnapshot, previousChildName: String?) {}
+            override fun onCancelled(error: DatabaseError) {}
+        }
+        ref.addChildEventListener(listener)
+        viewerCandidatesListeners[viewerId] = listener
+    }
+
+    private fun drainPendingCandidates(viewerId: String? = null) {
+        if (isBroadcaster && viewerId != null) {
+            val pc = viewerPeerConnections[viewerId]
+            viewerPendingCandidates[viewerId]?.forEach { pc?.addIceCandidate(it) }
+            viewerPendingCandidates.remove(viewerId)
+        } else {
+            pendingCandidates.forEach { peerConnection?.addIceCandidate(it) }
+            pendingCandidates.clear()
+        }
     }
 
     fun initSurfaceViewRenderer(renderer: SurfaceViewRenderer, isLocal: Boolean = true) {
@@ -621,45 +658,43 @@ class WebRTCManager(private val context: Context) {
             remoteVideoSink = null
         }
     }
-    
-    private fun listenForRemoteCandidates(sessionId: String, isCaller: Boolean) {
-        cleanupCandidatesListener()
-        val path = if (isCaller) "calleeCandidates" else "callerCandidates"
-        candidatesRef = database.getReference("sessions/$sessionId/$path")
-        candidatesListener = object : ChildEventListener {
-            override fun onChildAdded(snapshot: DataSnapshot, previousChildName: String?) {
-                val candidateStr = snapshot.child("candidate").getValue(String::class.java)
-                val sdpMid = snapshot.child("sdpMid").getValue(String::class.java)
-                val sdpMLineIndex = snapshot.child("sdpMLineIndex").getValue(Int::class.java)
-                if (candidateStr != null && sdpMid != null && sdpMLineIndex != null && peerConnection != null) {
-                    val candidate = IceCandidate(sdpMid, sdpMLineIndex, candidateStr)
-                    if (peerConnection?.remoteDescription == null) {
-                        pendingCandidates.add(candidate)
-                    } else {
-                        peerConnection?.addIceCandidate(candidate)
-                    }
-                }
-            }
 
-            override fun onChildChanged(snapshot: DataSnapshot, previousChildName: String?) {}
-            override fun onChildRemoved(snapshot: DataSnapshot) {}
-            override fun onChildMoved(snapshot: DataSnapshot, previousChildName: String?) {}
-            override fun onCancelled(error: DatabaseError) {}
-        }
-        candidatesRef?.addChildEventListener(candidatesListener!!)
+    fun closeConnectionToViewer(viewerId: String) {
+        val pc = viewerPeerConnections.remove(viewerId)
+        try {
+            pc?.close()
+            pc?.dispose()
+        } catch (e: Exception) {}
+        
+        val sessionId = currentSessionId ?: return
+        
+        val answerRef = database.getReference("sessions/$sessionId/viewers/$viewerId/answer")
+        viewerAnswerListeners.remove(viewerId)?.let { answerRef.removeEventListener(it) }
+        
+        val candidatesRef = database.getReference("sessions/$sessionId/viewers/$viewerId/calleeCandidates")
+        viewerCandidatesListeners.remove(viewerId)?.let { candidatesRef.removeEventListener(it) }
+        
+        viewerPendingCandidates.remove(viewerId)
+        
+        updateOverallConnectionState()
+    }
+
+    private fun cleanupOfferListener() {
+        offerListener?.let { offerRef?.removeEventListener(it) }
+        offerListener = null
+        offerRef = null
+    }
+
+    private fun cleanupAnswerListener() {
+        answerListener?.let { answerRef?.removeEventListener(it) }
+        answerListener = null
+        answerRef = null
     }
 
     private fun cleanupCandidatesListener() {
         candidatesListener?.let { candidatesRef?.removeEventListener(it) }
         candidatesListener = null
         candidatesRef = null
-    }
-
-    private fun drainPendingCandidates() {
-        for (candidate in pendingCandidates) {
-            peerConnection?.addIceCandidate(candidate)
-        }
-        pendingCandidates.clear()
     }
 
     private fun cleanupSessionListener() {
@@ -674,6 +709,19 @@ class WebRTCManager(private val context: Context) {
         cleanupOfferListener()
         cleanupCandidatesListener()
         cleanupViewersListener()
+        
+        // Cleanup multi-viewer listeners
+        val sessionId = currentSessionId
+        if (sessionId != null) {
+            viewerAnswerListeners.forEach { (vId, listener) ->
+                database.getReference("sessions/$sessionId/viewers/$vId/answer").removeEventListener(listener)
+            }
+            viewerCandidatesListeners.forEach { (vId, listener) ->
+                database.getReference("sessions/$sessionId/viewers/$vId/calleeCandidates").removeEventListener(listener)
+            }
+        }
+        viewerAnswerListeners.clear()
+        viewerCandidatesListeners.clear()
     }
 
     fun takeScreenshot(context: Context, isLocal: Boolean = true): String? {
@@ -722,6 +770,8 @@ class WebRTCManager(private val context: Context) {
 
         // 1. Capture references and immediately nullify to avoid race conditions with new sessions
         val pcToDispose = peerConnection
+        val viewersToDispose = HashMap(viewerPeerConnections)
+        
         val vtToDispose = localVideoTrack
         val atToDispose = localAudioTrack
         val lmsToDispose = localMediaStream
@@ -762,6 +812,8 @@ class WebRTCManager(private val context: Context) {
 
         // Reset state members immediately
         peerConnection = null
+        viewerPeerConnections.clear()
+        
         localVideoTrack = null
         localAudioTrack = null
         localMediaStream = null
@@ -797,19 +849,18 @@ class WebRTCManager(private val context: Context) {
                         }
                     } else {
                         try {
-                            ref.child("answer").onDisconnect().cancel()
-                            ref.child("calleeCandidates").onDisconnect().cancel()
                             if (viewerIdToDelete != null) {
+                                ref.child("viewers").child(viewerIdToDelete).child("answer").onDisconnect().cancel()
+                                ref.child("viewers").child(viewerIdToDelete).child("calleeCandidates").onDisconnect().cancel()
                                 ref.child("viewers").child(viewerIdToDelete).child("status").onDisconnect().cancel()
+                                
+                                ref.child("viewers").child(viewerIdToDelete).child("answer").removeValue()
+                                ref.child("viewers").child(viewerIdToDelete).child("calleeCandidates").removeValue()
+                                ref.child("viewers").child(viewerIdToDelete).child("status").setValue("Offline")
                             }
                         } catch (e: Exception) {}
                         
-                        ref.child("answer").removeValue()
-                        ref.child("calleeCandidates").removeValue()
-                        
                         if (viewerIdToDelete != null) {
-                            ref.child("viewers").child(viewerIdToDelete).child("status").setValue("Offline")
-                            
                             // Check if this was the last viewer to clear isOccupied
                             ref.child("metadata/deviceId").get().addOnSuccessListener { snapshot ->
                                 val monitorId = snapshot.getValue(String::class.java)
@@ -859,6 +910,13 @@ class WebRTCManager(private val context: Context) {
                 try { asToDispose?.dispose() } catch (e: Exception) {}
 
                 pcToDispose?.let { pc ->
+                    try {
+                        pc.close()
+                        pc.dispose()
+                    } catch (e: Exception) {}
+                }
+                
+                viewersToDispose.values.forEach { pc ->
                     try {
                         pc.close()
                         pc.dispose()

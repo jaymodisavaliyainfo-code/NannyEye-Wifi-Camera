@@ -423,8 +423,13 @@ fun AppNavigation() {
         detailScreen("all_devices_screen") { _ ->
             AllDevicesScreen(
                 onBack = { navController.popBackStack() },
-                onActivate = { sessionId ->
-                    navController.navigate("viewer/${Uri.encode(sessionId)}")
+                onActivate = { sessionId, role ->
+                    if (role == "camera") {
+                        navController.navigate("viewer/${Uri.encode(sessionId)}")
+                    } else {
+                        // For monitors (viewers), we resume the camera view for that session
+                        navController.navigate("camera_view/${Uri.encode(sessionId)}")
+                    }
                 },
                 viewModel = cameraViewModel
             )

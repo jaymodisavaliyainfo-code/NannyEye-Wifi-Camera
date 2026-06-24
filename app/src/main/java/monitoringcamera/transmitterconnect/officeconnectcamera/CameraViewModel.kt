@@ -49,19 +49,20 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
     private val tag = "CameraViewModel"
 
     val webRTCManager: WebRTCManager = WebRTCManager(application)
-    val remotePreviewManager: WebRTCManager = WebRTCManager(application)
     private val audioManager: AudioManager =
         application.getSystemService(Context.AUDIO_SERVICE) as AudioManager
 
     val myDeviceId = MutableLiveData<String>("")
-    val ViewerDeviceId = MutableLiveData<String>("")
+    val viewerDeviceId = MutableLiveData<String>("")
     val sessionId = MutableLiveData<String>("")
     val deviceName = MutableLiveData<String>("")
     val qrBitmap = MutableLiveData<Bitmap>()
     val activePreviewSessionId = MutableLiveData<String?>(null)
     val activePreviewDeviceName = MutableLiveData<String>("")
     val isConnected: LiveData<Boolean> = webRTCManager.connectionState
-    val isRemoteConnected: LiveData<Boolean> = remotePreviewManager.connectionState
+    private val _isBroadcasting = MutableLiveData(false)
+    val isBroadcasting: LiveData<Boolean> = _isBroadcasting
+    val isRemoteConnected: LiveData<Boolean> = webRTCManager.connectionState
     val sessionStatus: LiveData<String?> = webRTCManager.sessionStatus
     val isFrontFacing: LiveData<Boolean> = webRTCManager.isFrontFacingLiveData
 
@@ -188,12 +189,17 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                     if (_isCreator.value == false) {
                         markAsCreator()
                     }
+                }
+            }
+        }
 
-                    // Save session record and device only when someone actually connects
-                    sessionId.value?.let { sid ->
-                        val name = deviceName.value ?: "${Build.MANUFACTURER} ${Build.MODEL}"
-                        saveDevice("monitor_$sid", sid, name, "monitor")
-                    }
+        // Observe session status to log remote stops
+        webRTCManager.sessionStatus.observeForever { status ->
+            if (status == "closed") {
+                val isBroadcaster = webRTCManager.isBroadcaster
+                if (!isBroadcaster) {
+                    // Monitor device observing that the remote camera has stopped
+                    logActivity("Remote Camera Stopped", "The camera has ended the session", "monitor_disconnect", "monitor")
                 }
             }
         }
@@ -285,7 +291,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         settingsPrefs.edit().putString("my_device_name", newName).apply()
     }
 
-    fun logActivity(title: String, subtitle: String, iconType: String) {
+    fun logActivity(title: String, subtitle: String, iconType: String, role: String = "camera") {
         val now = System.currentTimeMillis()
         // Debounce: Ignore identical logs within 3 seconds to prevent UI spam
         if (lastLoggedActivity?.first == title && lastLoggedActivity?.second == subtitle && (now - lastLogTimestamp) < 3000) {
@@ -295,10 +301,10 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         lastLogTimestamp = now
 
         val id = UUID.randomUUID().toString()
-        val activity = CameraActivity(id, title, subtitle, now, iconType)
+        val activity = CameraActivity(id, title, subtitle, now, iconType, role)
         viewModelScope.launch(Dispatchers.IO) {
             cameraActivityDao.insert(activity)
-            Log.d(tag, "Activity logged to Room: $title")
+            Log.d(tag, "Activity logged to Room: $title ($role)")
         }
     }
 
@@ -445,13 +451,22 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         }
     }
 
-    fun fetchAndSaveDeviceMetadata(sessionId: String, role: String = "receiver") {
+    fun fetchAndSaveDeviceMetadata(sessionId: String, role: String = "camera") {
         val database = FirebaseDatabase.getInstance()
         database.getReference("sessions/$sessionId/metadata").addListenerForSingleValueEvent(object : ValueEventListener {
             override fun onDataChange(snapshot: DataSnapshot) {
                 val name = snapshot.child("name").getValue(String::class.java) ?: "Unknown Device"
                 val deviceId = snapshot.child("deviceId").getValue(String::class.java) ?: "unknown_$sessionId"
                 saveDevice(deviceId, sessionId, name, role)
+
+                // Log the addition of the device
+                if (role == "camera") {
+                    // This device is a Monitor adding a remote Camera
+                    logActivity("Remote Camera Linked", name, "monitor_connect", "monitor")
+                } else {
+                    // This device is a Camera being linked to by a remote Monitor
+                    logActivity("Monitor Linked", name, "monitor_connect", "camera")
+                }
             }
             override fun onCancelled(error: DatabaseError) {}
         })
@@ -463,10 +478,11 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         }
     }
 
-    fun takeScreenshot(context: android.content.Context, isLocal: Boolean = true): String? {
+    fun takeScreenshot(context: Context, isLocal: Boolean = true): String? {
         val path = webRTCManager.takeScreenshot(context, isLocal)
         if (path != null) {
-            logActivity("Screenshot Taken", File(path).name, "image")
+            val role = if (isLocal) "camera" else "monitor"
+            logActivity("Screenshot Taken", File(path).name, "screenshot", role)
         }
         return path
     }
@@ -499,9 +515,11 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
 
                             val logKey = "${sid}_${dId}"
                             if (!loggedViewerSessions.contains(logKey)) {
-                                logActivity("Monitor Connected", name, "monitor_connect")
+                                logActivity("Monitor Connected", name, "monitor_connect", "camera")
                                 loggedViewerSessions.add(logKey)
                                 activeViewerIds.add(dId)
+                                // Save the monitor device to camera's recently joined list
+                                saveDevice(dId, sid, name, "monitor")
                             }
                         }
                     }
@@ -513,7 +531,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                         if (!newIds.contains(oldId)) {
                             // Find name from previous state or default
                             val oldName = _connectedViewers.value?.find { it.deviceId == oldId }?.name ?: "Unknown Monitor"
-                            logActivity("Monitor Disconnected", oldName, "monitor_disconnect")
+                            logActivity("Monitor Disconnected", oldName, "monitor_disconnect", "camera")
                             loggedViewerSessions.remove("${sid}_${oldId}")
                             iterator.remove()
                         }
@@ -567,7 +585,8 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         val name = deviceName.value ?: "${Build.MANUFACTURER} ${Build.MODEL}"
         val dId = myDeviceId.value ?: ""
 
-        logActivity("Camera Started", name, "camera_start")
+        logActivity("Camera Started", name, "camera_start", "camera")
+        _isBroadcasting.postValue(true)
 
         /*// Ensure we are marked as Live when starting streaming if not already done via resumeHostSession
         val ref = FirebaseDatabase.getInstance().getReference("SaveSessions/$dId")
@@ -615,35 +634,45 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         viewerRef.setValue(viewerData)
         viewerRef.onDisconnect().removeValue()
 
-        logActivity("Monitor Connected", "This device ($name)", "monitor_connect")
+        logActivity("Viewing Started", "Connected to remote camera", "monitor_connect", "monitor")
+        _isBroadcasting.postValue(false)
 
         webRTCManager.connectAsViewer(sessionId, remoteSink, dId)
     }
 
     fun startRemotePreview(sessionId: String, sink: VideoSink) {
         val dId = myDeviceId.value ?: ""
-        remotePreviewManager.connectAsViewer(sessionId, sink, dId)
+        webRTCManager.connectAsViewer(sessionId, sink, dId)
     }
 
     fun stopRemotePreview() {
-        remotePreviewManager.release()
+        webRTCManager.release()
+    }
+
+    fun removeRemoteSink(sink: VideoSink) {
+        webRTCManager.removeRemoteSink(sink)
+    }
+
+    fun removeLocalSink(sink: VideoSink) {
+        webRTCManager.removeLocalSink(sink)
     }
 
     fun stopViewing(sink: VideoSink? = null) {
         sink?.let { webRTCManager.removeRemoteSink(it) }
         val name = deviceName.value ?: "This device"
-        logActivity("Monitor Stopped", name, "monitor_disconnect")
+        logActivity("Viewing Stopped", "Disconnected from camera", "monitor_disconnect", "monitor")
         stop()
     }
 
     fun stopStreaming(sink: VideoSink? = null) {
         sink?.let { webRTCManager.removeLocalSink(it) }
         val name = deviceName.value ?: "This device"
-        logActivity("Camera Stopped", name, "camera_stop")
+        logActivity("Camera Stopped", name, "camera_stop", "camera")
         stop()
     }
 
     fun stop() {
+        _isBroadcasting.postValue(false)
         // Remove from SaveSessions when stopping
         val sid = sessionId.value
         val did = myDeviceId.value
@@ -697,7 +726,8 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
             Log.d(tag, "Recording stopped, saved to: $path")
             
             val fileName = path?.let { File(it).name } ?: "Video clip"
-            logActivity("Video recorded", fileName, "video_record")
+            val role = if (webRTCManager.isBroadcaster) "camera" else "monitor"
+            logActivity("Video recorded", fileName, "video_record", role)
         } catch (e: Exception) {
             Log.e(tag, "stopRecording error: ${e.message}")
         }
@@ -748,7 +778,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
 
     fun stopAll() {
         val sid = sessionId.value
-        val did = ViewerDeviceId.value
+        val did = viewerDeviceId.value
         if (sid != null && did != null) {
             FirebaseDatabase.getInstance().getReference("SaveSessions")
                 .child(did)
