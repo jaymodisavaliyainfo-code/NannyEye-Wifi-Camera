@@ -1,8 +1,9 @@
 ﻿<resources>
     <string name="app_name">NannyEye: WiFi Camera &amp; Monitor</string>
     <string name="dashboard">DASHBOARD</string>
-    <string name="records">Records</string>
+    <string name="records">RECORDS</string>
     <string name="devices">DEVICES</string>
+    <string name="alerts">ALERTS</string>
     <string name="settings">SETTINGS</string>
     <string name="recent_sessions">Monitor Cameras</string>
     <string name="connected_viewers">CONNECTED VIEWERS</string>

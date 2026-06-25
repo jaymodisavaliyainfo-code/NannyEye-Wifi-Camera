@@ -18,6 +18,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -52,11 +53,14 @@ import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Devices
 import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.Folder
+import androidx.compose.material.icons.filled.GridView
 import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material.icons.filled.Laptop
 import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material.icons.filled.Notifications
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.PlayCircle
 import androidx.compose.material.icons.filled.Podcasts
@@ -65,6 +69,7 @@ import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Shield
 import androidx.compose.material.icons.filled.Smartphone
+import androidx.compose.material.icons.filled.Star
 import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material.icons.filled.Videocam
 import androidx.compose.material.icons.filled.VideocamOff
@@ -92,9 +97,12 @@ import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.FilterChipDefaults
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.ModalDrawerSheet
+import androidx.compose.material3.ModalNavigationDrawer
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Scaffold
@@ -103,6 +111,8 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
+import androidx.compose.material3.DrawerValue
+import androidx.compose.material3.rememberDrawerState
 import androidx.compose.material3.rememberDatePickerState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
@@ -193,16 +203,259 @@ import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.ui.graphics.drawscope.Fill
 
 @Composable
+fun DrawerMenuItem(
+    icon: ImageVector,
+    title: String,
+    onClick: () -> Unit,
+    showDot: Boolean = false,
+    textColor: Color = Color.White,
+    iconColor: Color = Color.White.copy(alpha = 0.6f)
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable { onClick() }
+            .padding(horizontal = 24.dp, vertical = 20.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Box(
+            modifier = Modifier
+                .size(44.dp)
+                .background(Color(0xFF161B22), RoundedCornerShape(12.dp)),
+            contentAlignment = Alignment.Center
+        ) {
+            Icon(
+                imageVector = icon,
+                contentDescription = null,
+                tint = iconColor,
+                modifier = Modifier.size(22.dp)
+            )
+            if (showDot) {
+                Surface(
+                    modifier = Modifier
+                        .size(8.dp)
+                        .align(Alignment.TopEnd)
+                        .offset(x = (-4).dp, y = 4.dp),
+                    shape = CircleShape,
+                    color = Color(0xFFFF8A65)
+                ) {}
+            }
+        }
+        Spacer(modifier = Modifier.width(20.dp))
+        Text(
+            text = title.uppercase(),
+            color = textColor,
+            fontSize = 14.sp,
+            fontWeight = FontWeight.Bold,
+            modifier = Modifier.weight(1f)
+        )
+        Icon(
+            Icons.Default.ChevronRight,
+            contentDescription = null,
+            tint = Color.White.copy(alpha = 0.2f),
+            modifier = Modifier.size(20.dp)
+        )
+    }
+}
+
+@Composable
+fun SettingsDrawerContent(
+    navController: NavController,
+    authViewModel: AuthViewModel,
+    onClose: () -> Unit
+) {
+    val context = LocalContext.current
+    val user by authViewModel.user.collectAsState()
+    val fullName = remember(user) {
+        val prefs = context.getSharedPreferences("app_prefs", Context.MODE_PRIVATE)
+        prefs.getString("full_name", user?.displayName ?: "User") ?: "User"
+    }
+    val username = remember(user) {
+        val prefs = context.getSharedPreferences("app_prefs", Context.MODE_PRIVATE)
+        prefs.getString("username", fullName.lowercase().replace(" ", "")) ?: ""
+    }
+    val profileImageUri = remember(user) {
+        val prefs = context.getSharedPreferences("app_prefs", Context.MODE_PRIVATE)
+        prefs.getString("profile_image", "")
+    }
+
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(Color(0xFF0E1116))
+            .statusBarsPadding()
+    ) {
+        // Header
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(24.dp),
+            verticalAlignment = Alignment.Top,
+            horizontalArrangement = Arrangement.SpaceBetween
+        ) {
+            Box(contentAlignment = Alignment.BottomEnd) {
+                Surface(
+                    modifier = Modifier.size(80.dp),
+                    shape = RoundedCornerShape(20.dp),
+                    color = Color(0xFF1C222B)
+                ) {
+                    if (!profileImageUri.isNullOrEmpty()) {
+                        SubcomposeAsyncImage(
+                            model = profileImageUri,
+                            contentDescription = "Profile Image",
+                            modifier = Modifier.fillMaxSize(),
+                            contentScale = ContentScale.Crop
+                        )
+                    } else {
+                        Icon(
+                            Icons.Default.Person,
+                            contentDescription = null,
+                            tint = Color.White.copy(alpha = 0.6f),
+                            modifier = Modifier.padding(20.dp)
+                        )
+                    }
+                }
+                Surface(
+                    modifier = Modifier.size(16.dp).offset(x = 4.dp, y = 4.dp),
+                    shape = CircleShape,
+                    color = Color(0xFFBBC6E2),
+                    border = BorderStroke(2.dp, Color(0xFF0E1116))
+                ) {}
+            }
+            IconButton(
+                onClick = onClose,
+                modifier = Modifier.background(Color.White.copy(alpha = 0.05f), CircleShape)
+            ) {
+                Icon(
+                    Icons.AutoMirrored.Filled.ArrowForward,
+                    contentDescription = "Close",
+                    tint = Color.White,
+                    modifier = Modifier.rotate(180f).size(20.dp)
+                )
+            }
+        }
+
+        Column(modifier = Modifier.padding(horizontal = 24.dp)) {
+            Text(
+                text = "Good afternoon, $fullName",
+                color = Color.White,
+                fontSize = 22.sp,
+                fontWeight = FontWeight.Bold
+            )
+            Text(
+                text = "🛡 @${username.uppercase()} • SURVEILLANCE HUB",
+                color = Color(0xFF9CA3AF),
+                fontSize = 11.sp,
+                fontWeight = FontWeight.Bold,
+                letterSpacing = 1.sp
+            )
+        }
+
+        Spacer(modifier = Modifier.height(32.dp))
+        HorizontalDivider(color = Color.White.copy(alpha = 0.05f))
+
+        Column(
+            modifier = Modifier
+                .weight(1f)
+                .verticalScroll(rememberScrollState())
+        ) {
+            DrawerMenuItem(
+                icon = Icons.Default.Person,
+                title = "Account",
+                onClick = { 
+                    onClose()
+                    navController.navigate("account_settings") 
+                }
+            )
+            DrawerMenuItem(
+                icon = Icons.Default.Tune,
+                title = "Preferences",
+                onClick = { 
+                    onClose()
+                    navController.navigate("preferences") 
+                }
+            )
+            DrawerMenuItem(
+                icon = Icons.Outlined.Notifications,
+                title = "Notification",
+                showDot = true,
+                onClick = {
+                    val intent = Intent()
+                    if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
+                        intent.action = Settings.ACTION_ALL_APPS_NOTIFICATION_SETTINGS
+                        intent.putExtra(Settings.EXTRA_APP_PACKAGE, context.packageName)
+                    } else {
+                        intent.action = "android.settings.APP_NOTIFICATION_SETTINGS"
+                        intent.putExtra("app_package", context.packageName)
+                        intent.putExtra("app_uid", context.applicationInfo.uid)
+                    }
+                    context.startActivity(intent)
+                }
+            )
+            DrawerMenuItem(
+                icon = Icons.Outlined.Language,
+                title = "Language",
+                onClick = { navController.navigate("language_selection") }
+            )
+            DrawerMenuItem(
+                icon = Icons.Outlined.PrivacyTip,
+                title = "Privacy Policy",
+                onClick = { navController.navigate("privacy_policy") }
+            )
+            DrawerMenuItem(
+                icon = Icons.Outlined.ErrorOutline,
+                title = "Report a problem",
+                onClick = {
+                    val intent = Intent(Intent.ACTION_SENDTO).apply {
+                        data = Uri.parse("mailto:info@hacksec.ai")
+                    }
+                    context.startActivity(intent)
+                }
+            )
+            DrawerMenuItem(
+                icon = Icons.AutoMirrored.Outlined.HelpOutline,
+                title = "Contact Us",
+                onClick = {
+                    val intent = Intent(Intent.ACTION_SENDTO).apply {
+                        data = Uri.parse("mailto:info@hacksec.ai")
+                    }
+                    context.startActivity(intent)
+                }
+            )
+            DrawerMenuItem(
+                icon = Icons.AutoMirrored.Filled.Logout,
+                title = "Sign Out",
+                textColor = Color(0xFFFF8A80),
+                iconColor = Color(0xFFFF8A80),
+                onClick = { navController.navigate("sign_out_confirmation") }
+            )
+
+            Spacer(modifier = Modifier.height(32.dp))
+            
+            Text(
+                text = "NANNYEYE OS • V2.4.1",
+                color = Color.White.copy(alpha = 0.2f),
+                fontSize = 11.sp,
+                fontWeight = FontWeight.Bold,
+                textAlign = TextAlign.Center,
+                modifier = Modifier.fillMaxWidth().padding(bottom = 24.dp)
+            )
+        }
+    }
+}
+
+@Composable
 fun MainScreen(
     navController: NavController,
     viewModel: CameraViewModel = androidx.lifecycle.viewmodel.compose.viewModel(),
     authViewModel: AuthViewModel = androidx.lifecycle.viewmodel.compose.viewModel(),
     linkedDevicesViewModel: LinkedDevicesViewModel = androidx.lifecycle.viewmodel.compose.viewModel()
 ) {
-    val pagerState = rememberPagerState(pageCount = { 4 })
+    val pagerState = rememberPagerState(pageCount = { 5 })
     val coroutineScope = rememberCoroutineScope()
     val context = LocalContext.current
     val darkBackground = Color(0xFF0E1116)
+    val drawerState = rememberDrawerState(initialValue = DrawerValue.Closed)
 
     LaunchedEffect(Unit) {
         linkedDevicesViewModel.updateActivity()
@@ -215,27 +468,120 @@ fun MainScreen(
         onDispose {}
     }
 
-    Scaffold(
-        containerColor = darkBackground, bottomBar = {
-            BottomNavigationBar(pagerState.currentPage) { index ->
-                coroutineScope.launch {
-                    pagerState.animateScrollToPage(index)
+    ModalNavigationDrawer(
+        drawerState = drawerState,
+        drawerContent = {
+            ModalDrawerSheet(
+                drawerContainerColor = Color(0xFF0E1116),
+                drawerTonalElevation = 0.dp,
+                modifier = Modifier.width(320.dp).fillMaxHeight()
+            ) {
+                SettingsDrawerContent(
+                    navController = navController,
+                    authViewModel = authViewModel,
+                    onClose = { coroutineScope.launch { drawerState.close() } }
+                )
+            }
+        },
+        gesturesEnabled = drawerState.isOpen
+    ) {
+        Scaffold(
+            containerColor = darkBackground, bottomBar = {
+                BottomNavigationBar(pagerState.currentPage) { index ->
+                    coroutineScope.launch {
+                        pagerState.animateScrollToPage(index)
+                    }
+                }
+            }
+
+        ) { innerPadding ->
+            HorizontalPager(
+                state = pagerState,
+                modifier = Modifier.padding(innerPadding),
+                userScrollEnabled = true,
+                beyondViewportPageCount = 3
+            ) { page ->
+                when (page) {
+                    0 -> DashboardContent(
+                        navController,
+                        viewModel,
+                        authViewModel,
+                        linkedDevicesViewModel,
+                        onProfileClick = { coroutineScope.launch { drawerState.open() } }
+                    )
+
+                    1 -> DevicesContent(navController, viewModel)
+                    2 -> PremiumContent()
+                    3 -> RecordsContent(navController)
+                    4 -> AlertsContent()
                 }
             }
         }
+    }
+}
 
-    ) { innerPadding ->
-        HorizontalPager(
-            state = pagerState,
-            modifier = Modifier.padding(innerPadding),
-            userScrollEnabled = true,
-            beyondViewportPageCount = 3
-        ) { page ->
-            when (page) {
-                0 -> DashboardContent(navController, viewModel, authViewModel, linkedDevicesViewModel)
-                1 -> RecordsContent(navController)
-                2 -> DevicesContent(navController, viewModel)
-                3 -> SettingsContent(navController, authViewModel)
+@Composable
+fun PremiumContent() {
+    Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+        Text("Premium Content Coming Soon", color = Color.White)
+    }
+}
+
+@Composable
+fun AlertsContent() {
+    val density = LocalDensity.current
+    val textGrey = Color(0xFF9CA3AF)
+    
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(horizontal = 24.dp)
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(vertical = 16.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(
+                text = "NannyEye",
+                color = Color.White,
+                fontSize = 14.sp,
+                fontWeight = FontWeight.Bold,
+                letterSpacing = 1.sp
+            )
+        }
+
+        Text(
+            text = "Alerts",
+            color = Color.White,
+            fontSize = 32.sp,
+            fontWeight = FontWeight.Bold
+        )
+        Text(
+            text = "Security notifications",
+            color = textGrey,
+            fontSize = 12.sp,
+            fontWeight = FontWeight.Bold,
+            letterSpacing = 1.sp
+        )
+
+        Spacer(modifier = Modifier.height(32.dp))
+
+        Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                Icon(
+                    Icons.Outlined.Notifications,
+                    contentDescription = null,
+                    tint = textGrey.copy(alpha = 0.3f),
+                    modifier = Modifier.size(64.dp)
+                )
+                Spacer(modifier = Modifier.height(16.dp))
+                Text(
+                    text = "No alerts recorded today",
+                    color = textGrey,
+                    fontSize = 14.sp
+                )
             }
         }
     }
@@ -246,7 +592,8 @@ fun DashboardContent(
     navController: NavController,
     viewModel: CameraViewModel,
     authViewModel: AuthViewModel,
-    linkedDevicesViewModel: LinkedDevicesViewModel
+    linkedDevicesViewModel: LinkedDevicesViewModel,
+    onProfileClick: () -> Unit
 ) {
     val density = LocalDensity.current
     val configuration = LocalConfiguration.current
@@ -260,6 +607,11 @@ fun DashboardContent(
     val fullName = remember(user) {
         val prefs = context.getSharedPreferences("app_prefs", Context.MODE_PRIVATE)
         prefs.getString("full_name", user?.displayName ?: "User") ?: "User"
+    }
+
+    val profileImageUri = remember(user) {
+        val prefs = context.getSharedPreferences("app_prefs", Context.MODE_PRIVATE)
+        prefs.getString("profile_image", "")
     }
 
     val activeSessions = remember { mutableStateListOf<String>() }
@@ -401,16 +753,25 @@ fun DashboardContent(
             verticalAlignment = Alignment.CenterVertically
         ) {
             Surface(
-                modifier = Modifier.size(48.dp),
+                modifier = Modifier.size(48.dp).clickable { onProfileClick() },
                 shape = RoundedCornerShape(12.dp),
                 color = Color(0xFF1C222B)
             ) {
-                Icon(
-                    Icons.Default.Person,
-                    contentDescription = null,
-                    tint = Color.White.copy(alpha = 0.6f),
-                    modifier = Modifier.padding(8.dp)
-                )
+                if (!profileImageUri.isNullOrEmpty()) {
+                    SubcomposeAsyncImage(
+                        model = profileImageUri,
+                        contentDescription = "Profile Image",
+                        modifier = Modifier.fillMaxSize(),
+                        contentScale = ContentScale.Crop
+                    )
+                } else {
+                    Icon(
+                        Icons.Default.Person,
+                        contentDescription = null,
+                        tint = Color.White.copy(alpha = 0.6f),
+                        modifier = Modifier.padding(8.dp)
+                    )
+                }
             }
             Spacer(modifier = Modifier.width(12.dp))
             Column {
@@ -2398,909 +2759,436 @@ fun RecordsContent(
     navController: NavController,
     viewModel: CameraViewModel = androidx.lifecycle.viewmodel.compose.viewModel()
 ) {
-    var showRecordDialog by remember { mutableStateOf(false) }
-    var showPermissionDialog by remember { mutableStateOf(false) }
-    var showDeleteSheet by remember { mutableStateOf(false) }
-    var fileToDelete by remember { mutableStateOf<File?>(null) }
-    var selectedDateText by remember { mutableStateOf("") }
-    var showDatePicker by remember { mutableStateOf(false) }
-    var selectedFilters by remember { mutableStateOf(setOf<String>()) }
     var searchQuery by remember { mutableStateOf("") }
-    val datePickerState = rememberDatePickerState()
+    var selectedMediaType by remember { mutableStateOf("ALL MEDIA") }
+    var selectedCamera by remember { mutableStateOf("ALL CAMERAS") }
+    var selectedTime by remember { mutableStateOf("ANY TIME") }
+    
+    var showDatePicker by remember { mutableStateOf(false) }
+    var showMediaTypeMenu by remember { mutableStateOf(false) }
+    var showCameraMenu by remember { mutableStateOf(false) }
+
     val context = LocalContext.current
     val density = LocalDensity.current
-
-    LaunchedEffect(Unit) {
-        val sdf = SimpleDateFormat("MMMM dd, yyyy", Locale.getDefault())
-        selectedDateText = sdf.format(Date())
-    }
+    val textGrey = Color(0xFF9CA3AF)
+    val cardBackground = Color(0xFF161B22)
 
     val videoRecords by viewModel.videoRecords.observeAsState(emptyList())
+    val snapshots by viewModel.snapshots.observeAsState(emptyList())
     val isLoadingVideos by viewModel.isLoadingVideos.observeAsState(false)
-    val recordVideos by viewModel.recordVideos.observeAsState(emptyList())
-    val monitorVideos by viewModel.monitorVideos.observeAsState(emptyList())
-    val ipCameraVideos by viewModel.ipCameraVideos.observeAsState(emptyList())
+    val savedDevices by viewModel.savedDevices.observeAsState(emptyList())
 
-    val filteredVideoRecords = remember(
-        videoRecords, selectedFilters, recordVideos, monitorVideos, ipCameraVideos, searchQuery
-    ) {
-        val baseList = if (selectedFilters.isEmpty() || selectedFilters.contains("All")) {
-            videoRecords
-        } else {
-            val result = mutableListOf<CameraViewModel.VideoRecord>()
-            if (selectedFilters.contains("Record")) result.addAll(recordVideos)
-            if (selectedFilters.contains("Monitor")) result.addAll(monitorVideos)
-            if (selectedFilters.contains("IP Camera")) result.addAll(ipCameraVideos)
-            result.distinctBy { it.file.absolutePath }
-        }
+    val userPrefs = remember { context.getSharedPreferences("app_prefs", Context.MODE_PRIVATE) }
+    val profileImageUri = userPrefs.getString("profile_image", "")
 
-        if (searchQuery.isEmpty()) {
-            baseList.sortedByDescending { it.file.lastModified() }
-        } else {
-            baseList.filter { it.name.contains(searchQuery, ignoreCase = true) }
-                .sortedByDescending { it.file.lastModified() }
+    val filteredClips = remember(videoRecords, searchQuery, selectedCamera) {
+        videoRecords.filter { record ->
+            val matchesSearch = record.name.contains(searchQuery, ignoreCase = true)
+            val matchesCamera = when (selectedCamera) {
+                "ALL CAMERAS" -> true
+                "RECORD" -> record.name.startsWith("REC_") && record.file.extension != "m4a" && !record.name.startsWith("MON_")
+                "MONITOR" -> record.file.extension == "m4a" || record.name.startsWith("MON_")
+                "IP CAMERA" -> record.name.startsWith("RTSP_")
+                else -> record.name.contains(selectedCamera, ignoreCase = true)
+            }
+            matchesSearch && matchesCamera
         }
     }
 
-    val storagePermission =
-        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU) {
-            Manifest.permission.READ_MEDIA_VIDEO
-        } else {
-            Manifest.permission.READ_EXTERNAL_STORAGE
+    val filteredSnapshots = remember(snapshots, searchQuery, selectedCamera) {
+        snapshots.filter { record ->
+            val matchesSearch = record.name.contains(searchQuery, ignoreCase = true)
+            val matchesCamera = when (selectedCamera) {
+                "ALL CAMERAS" -> true
+                "RECORD" -> record.name.startsWith("REC_") && record.file.extension != "m4a" && !record.name.startsWith("MON_")
+                "MONITOR" -> record.file.extension == "m4a" || record.name.startsWith("MON_")
+                "IP CAMERA" -> record.name.startsWith("RTSP_")
+                else -> record.name.contains(selectedCamera, ignoreCase = true)
+            }
+            matchesSearch && matchesCamera
         }
+    }
+
+    val storagePermission = if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU) {
+        Manifest.permission.READ_MEDIA_VIDEO
+    } else {
+        Manifest.permission.READ_EXTERNAL_STORAGE
+    }
 
     val storagePermissionLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.RequestPermission()
     ) { isGranted ->
-        if (isGranted) {
-            viewModel.refreshVideoRecords()
-        }
+        if (isGranted) viewModel.refreshVideoRecords()
     }
 
     LaunchedEffect(Unit) {
-        if (ContextCompat.checkSelfPermission(
-                context, storagePermission
-            ) == PackageManager.PERMISSION_GRANTED
-        ) {
+        if (ContextCompat.checkSelfPermission(context, storagePermission) == PackageManager.PERMISSION_GRANTED) {
             viewModel.refreshVideoRecords()
         } else {
             storagePermissionLauncher.launch(storagePermission)
         }
     }
 
-    val activity = context as Activity
-    val textGrey = Color(0xFF9CA3AF)
-    val cardBackground = Color(0xFF181C22)
-    val primaryGradient = Brush.horizontalGradient(
-        colors = listOf(Color(0xFFBBC6E2), Color(0xFF1B263B))
-    )
-
-    val configuration = LocalConfiguration.current
-    val screenWidthDp = configuration.screenWidthDp.dp
-    val isTablet = configuration.screenWidthDp >= 600
-
-    val permissionLauncher = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.RequestMultiplePermissions()
-    ) { permissions ->
-        val cameraGranted = permissions[Manifest.permission.CAMERA] ?: false
-        val audioGranted = permissions[Manifest.permission.RECORD_AUDIO] ?: false
-
-        if (cameraGranted && audioGranted) {
-            navController.navigate("record_video")
-        } else {
-            // Check if user denied permanently
-            val cameraPermanentlyDenied =
-                !cameraGranted && !ActivityCompat.shouldShowRequestPermissionRationale(
-                    activity, Manifest.permission.CAMERA
-                )
-            val audioPermanentlyDenied =
-                !audioGranted && !ActivityCompat.shouldShowRequestPermissionRationale(
-                    activity, Manifest.permission.RECORD_AUDIO
-                )
-
-            if (cameraPermanentlyDenied || audioPermanentlyDenied) {
-                showPermissionDialog = true
-            }
-        }
-    }
-
-    if (showPermissionDialog) {
-        CustomPermissionDialog(onDismiss = { showPermissionDialog = false }, onOpenSettings = {
-            showPermissionDialog = false
-            val intent = Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
-                data = Uri.fromParts("package", context.packageName, null)
-            }
-            context.startActivity(intent)
-        })
-    }
-
-    if (showRecordDialog) {
-        AlertDialog(
-            onDismissRequest = { showRecordDialog = false },
-            containerColor = Color(0xFF1B1F26),
-            title = null,
-            text = {
-                Column {
-                    Button(
-                        onClick = {
-                            showRecordDialog = false
-                            val cameraPermission = ContextCompat.checkSelfPermission(
-                                context, Manifest.permission.CAMERA
-                            )
-                            val audioPermission = ContextCompat.checkSelfPermission(
-                                context, Manifest.permission.RECORD_AUDIO
-                            )
-
-                            if (cameraPermission == PackageManager.PERMISSION_GRANTED && audioPermission == PackageManager.PERMISSION_GRANTED) {
-                                navController.navigate("record_video")
-                            } else {
-                                permissionLauncher.launch(
-                                    arrayOf(
-                                        Manifest.permission.CAMERA, Manifest.permission.RECORD_AUDIO
-                                    )
-                                )
-                            }
-                        },
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(dimensionResource(id = R.dimen.button_height_small)),
-                        shape = RoundedCornerShape(dimensionResource(id = R.dimen.radius_standard)),
-                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF2C3542))
-                    ) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Icon(
-                                Icons.Default.Smartphone,
-                                null,
-                                modifier = Modifier.size(dimensionResource(id = R.dimen.icon_size_small))
-                            )
-                            Spacer(modifier = Modifier.width(dimensionResource(id = R.dimen.spacer_small)))
-                            Text(
-                                stringResource(id = R.string.record_on_phone),
-                                color = Color.White,
-                                fontSize = with(density) { dimensionResource(id = R.dimen.text_small).toSp() })
-                        }
-                    }
-
-                    Spacer(modifier = Modifier.height(dimensionResource(id = R.dimen.element_spacing)))
-
-                    Button(
-                        onClick = { showRecordDialog = false },
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(dimensionResource(id = R.dimen.button_height_small)),
-                        shape = RoundedCornerShape(dimensionResource(id = R.dimen.radius_standard)),
-                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF2C3542))
-                    ) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Icon(
-                                Icons.Default.Podcasts,
-                                null,
-                                modifier = Modifier.size(dimensionResource(id = R.dimen.icon_size_small))
-                            )
-                            Spacer(modifier = Modifier.width(dimensionResource(id = R.dimen.spacer_small)))
-                            Text(
-                                stringResource(id = R.string.online_broadcast),
-                                color = Color.White,
-                                fontSize = with(density) { dimensionResource(id = R.dimen.text_small).toSp() })
-                        }
-                    }
-                }
-            },
-            confirmButton = { })
-    }
-
-    Box(modifier = Modifier.fillMaxSize()) {
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(horizontal = dimensionResource(id = R.dimen.screen_padding))
-        ) {
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(vertical = dimensionResource(id = R.dimen.spacer_medium)),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Text(
-                    text = stringResource(id = R.string.app_name),
-                    color = Color.White,
-                    fontSize = with(density) { dimensionResource(id = R.dimen.text_small).toSp() },
-                    fontWeight = FontWeight.Bold,
-                    letterSpacing = with(density) { dimensionResource(id = R.dimen.letter_spacing_tight).toSp() })
-            }
-
-            LazyColumn(
-                modifier = Modifier.fillMaxSize()
-            ) {
-                item {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.SpaceBetween
-                    ) {
-                        Column {
-                            Text(
-                                text = stringResource(id = R.string.records),
-                                color = Color.White,
-                                fontSize = with(density) { dimensionResource(id = R.dimen.text_h1).toSp() },
-                                fontWeight = FontWeight.Bold
-                            )
-                            Text(
-                                text = stringResource(id = R.string.history_archives),
-                                color = textGrey,
-                                fontSize = with(density) { dimensionResource(id = R.dimen.text_caption).toSp() },
-                                fontWeight = FontWeight.Bold,
-                                letterSpacing = with(density) { dimensionResource(id = R.dimen.letter_spacing_tight).toSp() })
-                        }
-                        IconButton(
-                            onClick = {
-                                searchQuery = ""
-                                selectedFilters = emptySet()
-                                viewModel.refreshVideoRecords(null)
-                                val sdf = SimpleDateFormat("MMMM dd, yyyy", Locale.getDefault())
-                                selectedDateText = sdf.format(Date())
-                            },
-                            modifier = Modifier
-                                .clip(RoundedCornerShape(dimensionResource(id = R.dimen.radius_standard)))
-                                .background(Color.White.copy(alpha = 0.05f))
-                        ) {
-                            Icon(
-                                Icons.Default.Refresh,
-                                contentDescription = "Reset Filter",
-                                tint = Color.White,
-                                modifier = Modifier.size(dimensionResource(id = R.dimen.icon_size_medium_small))
-                            )
-                        }
-                    }
-
-                    Spacer(modifier = Modifier.height(dimensionResource(id = R.dimen.screen_padding)))
-
-                    // Search Bar
-                    OutlinedTextField(
-                        value = searchQuery,
-                        onValueChange = { searchQuery = it },
-                        modifier = Modifier.fillMaxWidth(),
-                        placeholder = {
-                            Text(
-                                "Search records...",
-                                color = textGrey,
-                                fontSize = with(density) { dimensionResource(id = R.dimen.text_small).toSp() })
-                        },
-                        leadingIcon = {
-                            Icon(
-                                Icons.Default.Search,
-                                null,
-                                tint = textGrey,
-                                modifier = Modifier.size(dimensionResource(id = R.dimen.icon_size_small))
-                            )
-                        },
-                        trailingIcon = if (searchQuery.isNotEmpty()) {
-                            {
-                                IconButton(onClick = { searchQuery = "" }) {
-                                    Icon(
-                                        Icons.Default.Close,
-                                        null,
-                                        tint = textGrey,
-                                        modifier = Modifier.size(dimensionResource(id = R.dimen.icon_size_small))
-                                    )
-                                }
-                            }
-                        } else null,
-                        shape = RoundedCornerShape(dimensionResource(id = R.dimen.radius_standard)),
-                        colors = OutlinedTextFieldDefaults.colors(
-                            focusedContainerColor = cardBackground,
-                            unfocusedContainerColor = cardBackground,
-                            focusedBorderColor = Color(0xFF77AEFF),
-                            unfocusedBorderColor = Color.Transparent,
-                            focusedTextColor = Color.White,
-                            unfocusedTextColor = Color.White
-                        ),
-                        singleLine = true)
-
-                    Spacer(modifier = Modifier.height(dimensionResource(id = R.dimen.spacer_medium)))
-
-                    // Date Dropdown
-                    Card(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clickable {
-                                showDatePicker = true
-                            },
-                        shape = RoundedCornerShape(dimensionResource(id = R.dimen.radius_standard)),
-                        colors = CardDefaults.cardColors(containerColor = cardBackground)
-                    ) {
-                        Row(
-                            modifier = Modifier.padding(dimensionResource(id = R.dimen.card_padding)),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Icon(
-                                Icons.Default.CalendarToday,
-                                null,
-                                tint = textGrey,
-                                modifier = Modifier.size(dimensionResource(id = R.dimen.icon_size_small))
-                            )
-                            Spacer(modifier = Modifier.width(dimensionResource(id = R.dimen.element_spacing)))
-                            Text(
-                                text = selectedDateText,
-                                color = Color.White,
-                                fontSize = with(density) { dimensionResource(id = R.dimen.text_small).toSp() },
-                                modifier = Modifier.weight(1f)
-                            )
-                            Icon(
-                                Icons.Default.KeyboardArrowDown,
-                                null,
-                                tint = textGrey,
-                                modifier = Modifier.size(dimensionResource(id = R.dimen.icon_size_small))
-                            )
-                        }
-                    }
-
-                    if (showDatePicker) {
-                        val datePickerState = rememberDatePickerState()
-                        val customDatePickerColors = DatePickerDefaults.colors(
-                            containerColor = Color(0xFF242B30),
-                            titleContentColor = Color.White,
-                            headlineContentColor = Color.White,
-                            weekdayContentColor = Color.White,
-                            subheadContentColor = Color.White,
-                            navigationContentColor = Color.White,
-                            yearContentColor = Color.White,
-                            currentYearContentColor = Color.White,
-                            selectedYearContentColor = Color(0xFF00344B),
-                            selectedYearContainerColor = Color(0xFF81CFFF),
-                            dayContentColor = Color.White,
-                            disabledDayContentColor = Color.White,
-                            selectedDayContentColor = Color(0xFF00344B),
-                            selectedDayContainerColor = Color(0xFF81CFFF),
-                            todayContentColor = Color(0xFF81CFFF),
-                            todayDateBorderColor = Color(0xFF81CFFF),
-                            dayInSelectionRangeContentColor = Color.White,
-                            dayInSelectionRangeContainerColor = Color(0xFF81CFFF).copy(alpha = 0.2f)
-                        )
-
-                        DatePickerDialog(
-                            onDismissRequest = { showDatePicker = false },
-                            colors = DatePickerDefaults.colors(
-                                containerColor = Color(0xFF242B30)
-                            ),
-                            confirmButton = {
-                                TextButton(onClick = {
-                                    datePickerState.selectedDateMillis?.let { millis ->
-                                        val date = Date(millis)
-                                        val sdf =
-                                            SimpleDateFormat("MMMM dd, yyyy", Locale.getDefault())
-                                        selectedDateText = sdf.format(date)
-                                        viewModel.refreshVideoRecords(date)
-                                    }
-                                    showDatePicker = false
-                                }) {
-                                    Text(
-                                        "OK",
-                                        color = Color(0xFF81CFFF),
-                                        fontSize = with(density) { dimensionResource(id = R.dimen.text_small).toSp() })
-                                }
-                            },
-                            dismissButton = {
-                                TextButton(onClick = { showDatePicker = false }) {
-                                    Text(
-                                        "Cancel",
-                                        color = Color(0xFF81CFFF),
-                                        fontSize = with(density) { dimensionResource(id = R.dimen.text_small).toSp() })
-                                }
-                            }) {
-                            DatePicker(
-                                state = datePickerState, colors = customDatePickerColors
-                            )
-                        }
-                    }
-
-                    Spacer(modifier = Modifier.height(dimensionResource(id = R.dimen.element_spacing)))
-
-                    // Filter Dropdown and Chips
-                    Column(modifier = Modifier.fillMaxWidth()) {
-                        Card(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .clickable {
-                                    // Toggle filter row: if filters are active, clear them to hide the row.
-                                    // If no filters are active, show the row with "All" selected.
-                                    if (selectedFilters.isNotEmpty()) {
-                                        selectedFilters = emptySet()
-                                    } else {
-                                        selectedFilters = setOf("All")
-                                    }
-                                },
-                            shape = RoundedCornerShape(dimensionResource(id = R.dimen.radius_standard)),
-                            colors = CardDefaults.cardColors(containerColor = cardBackground)
-                        ) {
-                            Row(
-                                modifier = Modifier.padding(dimensionResource(id = R.dimen.card_padding)),
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Icon(
-                                    Icons.Default.Tune,
-                                    null,
-                                    tint = textGrey,
-                                    modifier = Modifier.size(dimensionResource(id = R.dimen.icon_size_small))
-                                )
-                                Spacer(modifier = Modifier.width(dimensionResource(id = R.dimen.element_spacing)))
-                                Text(
-                                    stringResource(id = R.string.all_devices),
-                                    color = Color.White,
-                                    fontSize = with(density) { dimensionResource(id = R.dimen.text_small).toSp() },
-                                    modifier = Modifier.weight(1f)
-                                )
-                                Icon(
-                                    if (selectedFilters.isNotEmpty()) Icons.Default.KeyboardArrowUp
-                                    else Icons.Default.KeyboardArrowDown,
-                                    null,
-                                    tint = textGrey,
-                                    modifier = Modifier.size(dimensionResource(id = R.dimen.icon_size_small))
-                                )
-                            }
-                        }
-
-                        if (selectedFilters.isNotEmpty()) {
-                            Spacer(modifier = Modifier.height(dimensionResource(id = R.dimen.element_spacing)))
-                            val availableFilters = listOf("All", "Record", "Monitor", "IP Camera")
-                            LazyRow(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.spacedBy(dimensionResource(id = R.dimen.spacer_small))
-                            ) {
-                                items(availableFilters) { filter ->
-                                    val isSelected = selectedFilters.contains(filter)
-                                    FilterChip(
-                                        selected = isSelected,
-                                        onClick = {
-                                            selectedFilters = if (filter == "All") {
-                                                // Clicking the "All" chip clears all filters and hides the filter tab
-                                                emptySet()
-                                            } else {
-                                                if (isSelected) {
-                                                    selectedFilters - filter
-                                                } else {
-                                                    // Selecting a specific filter removes "All"
-                                                    (selectedFilters - "All") + filter
-                                                }
-                                            }
-                                        },
-                                        label = {
-                                            Text(
-                                                text = filter,
-                                                fontSize = with(density) { dimensionResource(id = R.dimen.text_caption).toSp() },
-                                                fontWeight = FontWeight.Medium
-                                            )
-                                        },
-                                        colors = FilterChipDefaults.filterChipColors(
-                                            containerColor = Color.White.copy(alpha = 0.05f),
-                                            labelColor = Color.White.copy(alpha = 0.6f),
-                                            selectedContainerColor = Color(0xFFBBC6E2),
-                                            selectedLabelColor = Color(0xFF101B30),
-                                            selectedLeadingIconColor = Color(0xFF101B30),
-                                            selectedTrailingIconColor = Color(0xFF101B30)
-                                        ),
-                                        border = FilterChipDefaults.filterChipBorder(
-                                            borderColor = Color.Transparent,
-                                            selectedBorderColor = Color.Transparent,
-                                            enabled = true,
-                                            selected = isSelected
-                                        ),
-                                        shape = RoundedCornerShape(dimensionResource(id = R.dimen.radius_large)),
-                                        leadingIcon = {
-                                            Icon(
-                                                imageVector = when (filter) {
-                                                    "Record" -> Icons.Default.Smartphone
-                                                    "Monitor" -> Icons.Default.Podcasts
-                                                    "IP Camera" -> Icons.Default.Videocam
-                                                    else -> Icons.Default.History
-                                                },
-                                                contentDescription = null,
-                                                modifier = Modifier.size(
-                                                    dimensionResource(id = R.dimen.icon_size_small).div(
-                                                        1.3f
-                                                    )
-                                                )
-                                            )
-                                        },
-                                        trailingIcon = if (isSelected) {
-                                            {
-                                                Icon(
-                                                    imageVector = Icons.Default.Close,
-                                                    contentDescription = "Remove filter",
-                                                    modifier = Modifier
-                                                        .size(dimensionResource(id = R.dimen.spacer_medium))
-                                                        .clickable {
-                                                            selectedFilters =
-                                                                selectedFilters - filter
-                                                        })
-                                            }
-                                        } else null)
-                                }
-                            }
-                        }
-                    }
-
-                    Spacer(modifier = Modifier.height(dimensionResource(id = R.dimen.screen_padding)))
-                }
-
-                if (isLoadingVideos) {
-                    item {
-                        Box(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(dimensionResource(id = R.dimen.section_spacing)),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            CircularProgressIndicator(color = Color(0xFF77AEFF))
-                        }
-                    }
-                } else if (filteredVideoRecords.isEmpty()) {
-                    item {
-                        Column(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .clip(RoundedCornerShape(dimensionResource(id = R.dimen.radius_medium)))
-                                .background(cardBackground)
-                                .padding(dimensionResource(id = R.dimen.section_spacing)),
-                            horizontalAlignment = Alignment.CenterHorizontally
-                        ) {
-                            Image(
-                                painter = painterResource(id = R.drawable.norecord_img),
-                                contentDescription = null,
-                                modifier = Modifier
-                                    .fillMaxWidth(0.5f)
-                                    .height(
-                                        if (isTablet) screenWidthDp * 0.15f
-                                        else screenWidthDp * 0.25f
-                                    )
-                                    .widthIn(max = 200.dp),
-                                contentScale = ContentScale.Fit
-                            )
-                            Spacer(modifier = Modifier.height(dimensionResource(id = R.dimen.screen_padding)))
-                            Text(
-                                stringResource(id = R.string.no_recordings_yet),
-                                color = Color.White,
-                                fontSize = with(density) { dimensionResource(id = R.dimen.text_title).toSp() },
-                                fontWeight = FontWeight.Bold
-                            )
-                            Spacer(modifier = Modifier.height(dimensionResource(id = R.dimen.spacer_small)))
-                            Text(
-                                stringResource(id = R.string.no_recordings_description),
-                                color = textGrey,
-                                fontSize = with(density) { dimensionResource(id = R.dimen.text_small).toSp() },
-                                textAlign = TextAlign.Center,
-                                lineHeight = with(density) { dimensionResource(id = R.dimen.text_title).toSp() })
-                        }
-                        Spacer(modifier = Modifier.height(dimensionResource(id = R.dimen.screen_padding)))
-                    }
-                } else {
-                    items(filteredVideoRecords) { record ->
-                        Card(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(vertical = dimensionResource(id = R.dimen.spacer_small)),
-                            shape = RoundedCornerShape(dimensionResource(id = R.dimen.radius_medium)),
-                            colors = CardDefaults.cardColors(containerColor = cardBackground)
-                        ) {
-                            Row(
-                                modifier = Modifier.padding(dimensionResource(id = R.dimen.element_spacing)),
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Box(
-                                    modifier = Modifier
-                                        .size(dimensionResource(id = R.dimen.thumbnail_size))
-                                        .clip(RoundedCornerShape(dimensionResource(id = R.dimen.radius_standard)))
-                                        .background(Color.Black)
-                                        .clickable {
-                                            try {
-                                                val uri =
-                                                    androidx.core.content.FileProvider.getUriForFile(
-                                                        context,
-                                                        "${context.packageName}.provider",
-                                                        record.file
-                                                    )
-                                                val intent = Intent(Intent.ACTION_VIEW).apply {
-                                                    setDataAndType(uri, "video/*")
-                                                    addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-                                                }
-                                                context.startActivity(intent)
-                                            } catch (e: Exception) {
-                                                android.widget.Toast.makeText(
-                                                    context,
-                                                    "Could not open video",
-                                                    android.widget.Toast.LENGTH_SHORT
-                                                ).show()
-                                            }
-                                        }, contentAlignment = Alignment.Center
-                                ) {
-                                    if (record.thumbnail != null) {
-                                        Image(
-                                            bitmap = record.thumbnail.asImageBitmap(),
-                                            contentDescription = null,
-                                            modifier = Modifier.fillMaxSize(),
-                                            contentScale = ContentScale.Crop
-                                        )
-                                        // Semi-transparent overlay to make play icon visible
-                                        Box(
-                                            modifier = Modifier
-                                                .fillMaxSize()
-                                                .background(Color.Black.copy(alpha = 0.3f))
-                                        )
-                                    }
-                                    Icon(
-                                        Icons.Default.PlayCircle,
-                                        null,
-                                        tint = Color.White,
-                                        modifier = Modifier.size(dimensionResource(id = R.dimen.section_spacing))
-                                    )
-                                }
-                                Spacer(modifier = Modifier.width(dimensionResource(id = R.dimen.spacer_medium)))
-                                Column(modifier = Modifier.weight(1f)) {
-                                    Text(
-                                        text = record.name,
-                                        color = Color.White,
-                                        fontSize = with(density) { dimensionResource(id = R.dimen.text_small).toSp() },
-                                        fontWeight = FontWeight.Bold,
-                                        maxLines = 1
-                                    )
-                                    Spacer(modifier = Modifier.height(dimensionResource(id = R.dimen.spacer_micro)))
-                                    Text(
-                                        text = "${record.formattedDate} • ${record.duration}",
-                                        color = textGrey,
-                                        fontSize = with(density) { dimensionResource(id = R.dimen.text_caption).toSp() })
-                                    Text(
-                                        text = record.size,
-                                        color = textGrey.copy(alpha = 0.7f),
-                                        fontSize = with(density) { dimensionResource(id = R.dimen.text_micro).toSp() })
-                                }
-                                IconButton(onClick = {
-                                    fileToDelete = record.file
-                                    showDeleteSheet = true
-                                }) {
-                                    Icon(
-                                        Icons.Default.MoreVert,
-                                        null,
-                                        tint = Color.White.copy(alpha = 0.5f),
-                                        modifier = Modifier.size(dimensionResource(id = R.dimen.icon_size_small))
-                                    )
-                                }
-                            }
-                        }
-                    }
-                }
-
-                /* item {
-                     // Secure Storage Card
-                     Card(
-                         modifier = Modifier.fillMaxWidth(),
-                         shape = RoundedCornerShape(dimensionResource(id = R.dimen.radius_medium)),
-                         colors = CardDefaults.cardColors(containerColor = Color.Transparent)
-                     ) {
-                         Column(
-                             modifier = Modifier
-                                 .background(primaryGradient)
-                                 .fillMaxWidth()
-                         ) {
-                             Column(
-                                 modifier = Modifier.padding(dimensionResource(id = R.dimen.screen_padding))
-                             ) {
-                                 Row(verticalAlignment = Alignment.CenterVertically) {
-                                     Column {
-                                         Text(
-                                             stringResource(id = R.string.cloud),
-                                             color = textGrey,
-                                             fontSize = with(density) { dimensionResource(id = R.dimen.text_micro).toSp() },
-                                             fontWeight = FontWeight.Bold
-                                         )
-                                         Text(
-                                             stringResource(id = R.string.secure),
-                                             color = textGrey,
-                                             fontSize = with(density) { dimensionResource(id = R.dimen.text_micro).toSp() },
-                                             fontWeight = FontWeight.Bold
-                                         )
-                                     }
-                                 }
-                                 Spacer(modifier = Modifier.height(dimensionResource(id = R.dimen.element_spacing)))
-                                 Text(
-                                     text = stringResource(id = R.string.secure_video_storage),
-                                     color = Color.White,
-                                     fontSize = with(density) {
-                                         dimensionResource(id = R.dimen.text_title).toSp()
-                                             .times(1.4f)
-                                     },
-                                     fontWeight = FontWeight.Bold,
-                                     lineHeight = with(density) { dimensionResource(id = R.dimen.text_h1).toSp() })
-                                 Spacer(modifier = Modifier.height(dimensionResource(id = R.dimen.element_spacing)))
-                                 Text(
-                                     text = stringResource(id = R.string.secure_storage_description),
-                                     color = textGrey,
-                                     fontSize = with(density) {
-                                         dimensionResource(id = R.dimen.text_small).toSp()
-                                             .times(0.9f)
-                                     },
-                                     lineHeight = with(density) {
-                                         dimensionResource(id = R.dimen.text_body).toSp().times(1.1f)
-                                     })
-                                 Spacer(modifier = Modifier.height(dimensionResource(id = R.dimen.screen_padding)))
-                                 Button(
-                                     onClick = { },
-                                     modifier = Modifier.height(dimensionResource(id = R.dimen.button_height_small)),
-                                     colors = ButtonDefaults.buttonColors(
-                                         containerColor = Color(
-                                             0xFF242A35
-                                         )
-                                     ),
-                                     shape = RoundedCornerShape(dimensionResource(id = R.dimen.radius_standard))
-                                 ) {
-                                     Text(
-                                         stringResource(id = R.string.activate_sentinel_plus),
-                                         color = textGrey,
-                                         fontWeight = FontWeight.Bold,
-                                         fontSize = with(density) { dimensionResource(id = R.dimen.text_small).toSp() })
-                                 }
-                             }
-                             // Image Placeholder
-                             Box(
-                                 modifier = Modifier
-                                     .fillMaxWidth()
-                                     .height(dimensionResource(id = R.dimen.spacer_small).times(1.2f))
-                                     .background(
-                                         Brush.verticalGradient(
-                                             listOf(
-                                                 Color.Transparent,
-                                                 Color(0xFF001A26).copy(alpha = 0.5f)
-                                             )
-                                         )
-                                     ), contentAlignment = Alignment.Center
-                             ) {
-                                 Icon(
-                                     Icons.Default.Lock,
-                                     contentDescription = null,
-                                     tint = Color(0xFF77AEFF).copy(alpha = 0.3f),
-                                     modifier = Modifier.size(
-                                         dimensionResource(id = R.dimen.icon_size_large).times(
-                                             1.5f
-                                         )
-                                     )
-                                 )
-                             }
-                         }
-                     }
-                     Spacer(modifier = Modifier.height(dimensionResource(id = R.dimen.screen_padding)))
-                 }*/
-
-                item {
-                    Spacer(
-                        modifier = Modifier.height(
-                            dimensionResource(id = R.dimen.bottom_nav_height).times(
-                                1.2f
-                            )
-                        )
-                    )
-                }
-            }
-        }
-
-
-        // Record video button - fixed at bottom
-
-        Box(
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(horizontal = 24.dp)
+            .verticalScroll(rememberScrollState())
+    ) {
+        // 1. Header
+        Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .align(Alignment.BottomCenter)
-                .background(
-                    Brush.verticalGradient(
-                        colors = listOf(
-                            Color.Transparent,
-                            Color(0xFF0E1116).copy(alpha = 0.9f),
-                            Color(0xFF0E1116)
-                        ), startY = 0f, endY = 100f
-                    )
-                )
-                .padding(bottom = dimensionResource(id = R.dimen.spacer_medium)),
-            contentAlignment = Alignment.Center
+                .padding(vertical = 24.dp),
+            verticalAlignment = Alignment.CenterVertically
         ) {
-            Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth(if (isTablet) 0.35f else 0.55f)
-                        .widthIn(max = 300.dp)
-                        .height(dimensionResource(id = R.dimen.button_height))
-                        .shadow(
-                            elevation = dimensionResource(id = R.dimen.elevation_large),
-                            shape = RoundedCornerShape(dimensionResource(id = R.dimen.radius_medium)),
-                            ambientColor = Color(0xFF77AEFF).copy(alpha = 0.5f),
-                            spotColor = Color(0xFF77AEFF).copy(alpha = 0.5f)
-                        )
-                        .clip(RoundedCornerShape(dimensionResource(id = R.dimen.radius_medium)))
-                        .background(primaryGradient)
-                        .clickable {
-                            val cameraPermission = ContextCompat.checkSelfPermission(
-                                context, Manifest.permission.CAMERA
-                            )
-                            val audioPermission = ContextCompat.checkSelfPermission(
-                                context, Manifest.permission.RECORD_AUDIO
-                            )
+            Surface(
+                modifier = Modifier.size(48.dp),
+                shape = RoundedCornerShape(12.dp),
+                color = Color(0xFF1C222B)
+            ) {
+                if (!profileImageUri.isNullOrEmpty()) {
+                    SubcomposeAsyncImage(
+                        model = profileImageUri,
+                        contentDescription = "Profile",
+                        modifier = Modifier.fillMaxSize(),
+                        contentScale = ContentScale.Crop
+                    )
+                } else {
+                    Icon(
+                        Icons.Default.Person,
+                        contentDescription = null,
+                        tint = Color.White.copy(alpha = 0.6f),
+                        modifier = Modifier.padding(10.dp)
+                    )
+                }
+            }
+            Spacer(modifier = Modifier.width(16.dp))
+            Column {
+                Text(
+                    text = "NannyEye",
+                    color = Color.White,
+                    fontSize = 24.sp,
+                    fontWeight = FontWeight.Bold
+                )
+                Text(
+                    text = "${videoRecords.size} CLIPS • ${snapshots.size} SNAPSHOTS",
+                    color = textGrey,
+                    fontSize = 10.sp,
+                    fontWeight = FontWeight.Bold,
+                    letterSpacing = 1.sp
+                )
+            }
+        }
 
-                            if (cameraPermission == PackageManager.PERMISSION_GRANTED && audioPermission == PackageManager.PERMISSION_GRANTED) {
-                                navController.navigate("record_video")
-                            } else {
-                                permissionLauncher.launch(
-                                    arrayOf(
-                                        Manifest.permission.CAMERA, Manifest.permission.RECORD_AUDIO
-                                    )
-                                )
-                            }
-                        }, contentAlignment = Alignment.Center
+        // 2. Search Bar
+        OutlinedTextField(
+            value = searchQuery,
+            onValueChange = { searchQuery = it },
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(56.dp),
+            placeholder = { Text("Search recordings...", color = textGrey, fontSize = 14.sp) },
+            leadingIcon = { Icon(Icons.Default.Search, null, tint = textGrey, modifier = Modifier.size(20.dp)) },
+            trailingIcon = { Icon(Icons.Default.Tune, null, tint = textGrey, modifier = Modifier.size(20.dp)) },
+            shape = RoundedCornerShape(16.dp),
+            colors = OutlinedTextFieldDefaults.colors(
+                focusedContainerColor = cardBackground,
+                unfocusedContainerColor = cardBackground,
+                focusedBorderColor = Color.Transparent,
+                unfocusedBorderColor = Color.Transparent,
+                focusedTextColor = Color.White,
+                unfocusedTextColor = Color.White
+            ),
+            singleLine = true
+        )
+
+        Spacer(modifier = Modifier.height(16.dp))
+
+        // 3. Filters Row
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            FilterChipDropdown(
+                text = selectedMediaType,
+                onClick = { showMediaTypeMenu = true },
+                modifier = Modifier.weight(1f)
+            )
+            FilterChipDropdown(
+                text = selectedCamera,
+                onClick = { showCameraMenu = true },
+                modifier = Modifier.weight(1f)
+            )
+            FilterChipDropdown(
+                text = selectedTime,
+                onClick = { showDatePicker = true },
+                modifier = Modifier.weight(1f)
+            )
+        }
+
+        // Dropdowns Implementation
+        DropdownMenu(
+            expanded = showMediaTypeMenu,
+            onDismissRequest = { showMediaTypeMenu = false },
+            modifier = Modifier.background(cardBackground)
+        ) {
+            listOf("ALL MEDIA", "CLIPS", "SNAPSHOTS").forEach { type ->
+                DropdownMenuItem(
+                    text = { Text(type, color = Color.White, fontSize = 12.sp) },
+                    onClick = {
+                        selectedMediaType = type
+                        showMediaTypeMenu = false
+                    }
+                )
+            }
+        }
+
+        DropdownMenu(
+            expanded = showCameraMenu,
+            onDismissRequest = { showCameraMenu = false },
+            modifier = Modifier.background(cardBackground)
+        ) {
+            DropdownMenuItem(
+                text = { Text("ALL CAMERAS", color = Color.White, fontSize = 12.sp) },
+                onClick = {
+                    selectedCamera = "ALL CAMERAS"
+                    showCameraMenu = false
+                }
+            )
+            listOf("RECORD", "MONITOR", "IP CAMERA").forEach { option ->
+                DropdownMenuItem(
+                    text = { Text(option, color = Color.White, fontSize = 12.sp) },
+                    onClick = {
+                        selectedCamera = option
+                        showCameraMenu = false
+                    }
+                )
+            }
+        }
+
+        if (showDatePicker) {
+            val datePickerState = rememberDatePickerState()
+            DatePickerDialog(
+                onDismissRequest = { showDatePicker = false },
+                confirmButton = {
+                    TextButton(onClick = {
+                        datePickerState.selectedDateMillis?.let { millis ->
+                            val date = Date(millis)
+                            selectedTime = SimpleDateFormat("MMM dd", Locale.getDefault()).format(date).uppercase()
+                            viewModel.refreshVideoRecords(date)
+                        }
+                        showDatePicker = false
+                    }) { Text("OK", color = Color(0xFF77AEFF)) }
+                }
+            ) { DatePicker(state = datePickerState) }
+        }
+
+        Spacer(modifier = Modifier.height(32.dp))
+
+        // 4. Clips Section
+        if (selectedMediaType == "ALL MEDIA" || selectedMediaType == "CLIPS") {
+            SectionHeader(title = "Clips", countText = "${filteredClips.size} CAPTURED TODAY")
+            Spacer(modifier = Modifier.height(16.dp))
+            
+            if (filteredClips.isEmpty()) {
+                EmptySectionPlaceholder("No clips found")
+            } else {
+                LazyRow(
+                    horizontalArrangement = Arrangement.spacedBy(16.dp),
+                    contentPadding = PaddingValues(bottom = 16.dp)
                 ) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Icon(
-                            ImageVector.vectorResource(id = R.drawable.round_img),
-                            null,
-                            tint = Color.Black,
-                            modifier = Modifier.size(dimensionResource(id = R.dimen.icon_size_small))
-                        )
-                        Spacer(modifier = Modifier.width(dimensionResource(id = R.dimen.spacer_small)))
-                        Text(
-                            stringResource(id = R.string.record_video),
-                            color = Color.Black,
-                            fontWeight = FontWeight.Bold,
-                            fontSize = with(density) { dimensionResource(id = R.dimen.text_body).toSp() })
+                    items(filteredClips) { clip ->
+                        ClipThumbnail(clip) {
+                            playMedia(context, clip.file, "video/*")
+                        }
                     }
                 }
             }
         }
-    }
 
-    if (showDeleteSheet) {
-        ModalBottomSheet(
-            onDismissRequest = { showDeleteSheet = false },
-            containerColor = Color(0xFF1B1F26),
-            contentColor = Color.White
-        ) {
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(dimensionResource(id = R.dimen.card_padding))
-                    .padding(bottom = dimensionResource(id = R.dimen.section_spacing))
-            ) {
-                Text(
-                    text = stringResource(id = R.string.recording_options),
-                    fontSize = with(density) { dimensionResource(id = R.dimen.text_subtitle).toSp() },
-                    fontWeight = FontWeight.Bold,
-                    modifier = Modifier.padding(bottom = dimensionResource(id = R.dimen.element_spacing))
-                )
+        Spacer(modifier = Modifier.height(24.dp))
 
-                Row(modifier = Modifier
-                    .fillMaxWidth()
-                    .clickable {
-                        fileToDelete?.delete()
-                        viewModel.refreshVideoRecords()
-                        showDeleteSheet = false
+        // 5. Snapshots Section
+        if (selectedMediaType == "ALL MEDIA" || selectedMediaType == "SNAPSHOTS") {
+            SectionHeader(title = "Snapshots", countText = "${filteredSnapshots.size} CAPTURED TODAY")
+            Spacer(modifier = Modifier.height(16.dp))
+
+            if (filteredSnapshots.isEmpty()) {
+                EmptySectionPlaceholder("No snapshots found")
+            } else {
+                BoxWithConstraints(modifier = Modifier.fillMaxWidth()) {
+                    val columns = 3
+                    val spacing = 16.dp
+                    val itemWidth = (maxWidth - (spacing * (columns - 1))) / columns
+
+                    Column(verticalArrangement = Arrangement.spacedBy(spacing)) {
+                        filteredSnapshots.chunked(columns).forEach { rowItems ->
+                            Row(horizontalArrangement = Arrangement.spacedBy(spacing)) {
+                                rowItems.forEach { snapshot ->
+                                    SnapshotThumbnail(
+                                        record = snapshot,
+                                        modifier = Modifier.size(itemWidth)
+                                    ) {
+                                        playMedia(context, snapshot.file, "image/*")
+                                    }
+                                }
+                                // Fill empty spaces if row is not full
+                                repeat(columns - rowItems.size) {
+                                    Spacer(modifier = Modifier.size(itemWidth))
+                                }
+                            }
+                        }
                     }
-                    .background(
-                        Color.White.copy(alpha = 0.05f),
-                        RoundedCornerShape(dimensionResource(id = R.dimen.radius_standard))
-                    )
-                    .padding(dimensionResource(id = R.dimen.card_padding)),
-                    verticalAlignment = Alignment.CenterVertically) {
-                    Icon(
-                        Icons.Default.Delete,
-                        contentDescription = null,
-                        tint = Color.Red,
-                        modifier = Modifier.size(dimensionResource(id = R.dimen.icon_size_small))
-                    )
-                    Spacer(modifier = Modifier.width(dimensionResource(id = R.dimen.spacer_medium)))
-                    Text(
-                        stringResource(id = R.string.delete_recording),
-                        color = Color.Red,
-                        fontWeight = FontWeight.Medium,
-                        fontSize = with(density) { dimensionResource(id = R.dimen.text_small).toSp() })
                 }
             }
+        }
+
+        Spacer(modifier = Modifier.height(100.dp))
+    }
+}
+
+@Composable
+fun FilterChipDropdown(text: String, onClick: () -> Unit, modifier: Modifier = Modifier) {
+    Surface(
+        modifier = modifier
+            .height(40.dp)
+            .clickable { onClick() },
+        color = Color(0xFF161B22),
+        shape = RoundedCornerShape(12.dp)
+    ) {
+        Row(
+            modifier = Modifier.padding(horizontal = 12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceBetween
+        ) {
+            Text(
+                text = text,
+                color = Color.White,
+                fontSize = 10.sp,
+                fontWeight = FontWeight.Bold,
+                maxLines = 1
+            )
+            Icon(
+                Icons.Default.KeyboardArrowDown,
+                contentDescription = null,
+                tint = Color.White.copy(alpha = 0.3f),
+                modifier = Modifier.size(16.dp)
+            )
         }
     }
 }
+
+@Composable
+fun SectionHeader(title: String, countText: String) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Text(text = title, color = Color.White, fontSize = 20.sp, fontWeight = FontWeight.Bold)
+        Text(text = countText.uppercase(), color = Color(0xFF9CA3AF), fontSize = 10.sp, fontWeight = FontWeight.Bold, letterSpacing = 0.5.sp)
+    }
+}
+
+@Composable
+fun ClipThumbnail(record: CameraViewModel.VideoRecord, onClick: () -> Unit) {
+    Box(
+        modifier = Modifier
+            .size(140.dp)
+            .clip(RoundedCornerShape(20.dp))
+            .background(Color.Black)
+            .clickable { onClick() }
+    ) {
+        if (record.thumbnail != null) {
+            Image(
+                bitmap = record.thumbnail.asImageBitmap(),
+                contentDescription = null,
+                modifier = Modifier.fillMaxSize(),
+                contentScale = ContentScale.Crop
+            )
+            Box(modifier = Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.3f)))
+        }
+        
+        // Duration Tag
+        Surface(
+            modifier = Modifier
+                .align(Alignment.BottomEnd)
+                .padding(8.dp),
+            color = Color.Black.copy(alpha = 0.6f),
+            shape = RoundedCornerShape(4.dp)
+        ) {
+            Text(
+                text = record.duration,
+                color = Color.White,
+                fontSize = 9.sp,
+                fontWeight = FontWeight.Bold,
+                modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp)
+            )
+        }
+
+        // Play Icon
+        Icon(
+            Icons.Default.PlayCircle,
+            contentDescription = null,
+            tint = Color.White,
+            modifier = Modifier.size(32.dp).align(Alignment.Center)
+        )
+    }
+}
+
+@Composable
+fun SnapshotThumbnail(
+    record: CameraViewModel.VideoRecord,
+    modifier: Modifier = Modifier,
+    onClick: () -> Unit
+) {
+    Box(
+        modifier = modifier
+            .clip(RoundedCornerShape(16.dp))
+            .background(Color(0xFF1C222B))
+            .clickable { onClick() }
+    ) {
+        if (record.thumbnail != null) {
+            Image(
+                bitmap = record.thumbnail.asImageBitmap(),
+                contentDescription = null,
+                modifier = Modifier.fillMaxSize(),
+                contentScale = ContentScale.Crop
+            )
+        }
+    }
+}
+
+@Composable
+fun EmptySectionPlaceholder(text: String) {
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(100.dp),
+        contentAlignment = Alignment.Center
+    ) {
+        Text(text = text, color = Color.Gray, fontSize = 14.sp)
+    }
+}
+
+private fun playMedia(context: Context, file: File, mimeType: String) {
+    try {
+        val uri = androidx.core.content.FileProvider.getUriForFile(
+            context,
+            "${context.packageName}.provider",
+            file
+        )
+        val intent = Intent(Intent.ACTION_VIEW).apply {
+            setDataAndType(uri, mimeType)
+            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        }
+        context.startActivity(intent)
+    } catch (e: Exception) {
+        android.widget.Toast.makeText(context, "Cannot open file", android.widget.Toast.LENGTH_SHORT).show()
+    }
+}
+
 
 @Composable
 fun DevicesContent(navController: NavController, viewModel: CameraViewModel) {
@@ -3630,673 +3518,7 @@ fun DevicesContent(navController: NavController, viewModel: CameraViewModel) {
 }
 
 @Composable
-fun SettingsContent(navController: NavController, authViewModel: AuthViewModel) {
-    val density = LocalDensity.current
-    val textGrey = Color(0xFF9CA3AF)
-    val cardBackground = Color(0xFF1B1F26)
-    val context = LocalContext.current
-    val prefs = remember { context.getSharedPreferences("app_prefs", Context.MODE_PRIVATE) }
-
-    var fullName by remember {
-        mutableStateOf(
-            prefs.getString("full_name", "Julian Sterling") ?: "Julian Sterling"
-        )
-    }
-    var username by remember {
-        mutableStateOf(
-            prefs.getString("username", "julian.sterling") ?: "julian.sterling"
-        )
-    }
-    val user = FirebaseAuth.getInstance().currentUser
-    val userIdentifier = user?.email ?: user?.phoneNumber ?: "julian.sterling@nannyeye.io"
-    var profileImageUri by remember { mutableStateOf(prefs.getString("profile_image", "")) }
-    var showNameDialog by remember { mutableStateOf(false) }
-    var showEmailDialog by remember { mutableStateOf(false) }
-    var newName by remember { mutableStateOf(fullName) }
-    var updatedEmail by remember { mutableStateOf(user?.email ?: "") }
-    var isVerificationSent by remember { mutableStateOf(false) }
-    var showReauthDialog by remember { mutableStateOf(false) }
-    var reauthPassword by remember { mutableStateOf("") }
-    val scope = rememberCoroutineScope()
-
-    // Automatic fill data from Firestore
-    LaunchedEffect(user?.uid) {
-        user?.uid?.let { uid ->
-            val db = com.google.firebase.firestore.FirebaseFirestore.getInstance()
-            db.collection("users").document(uid).get().addOnSuccessListener { document ->
-                    if (document.exists()) {
-                        val name = document.getString("name") ?: ""
-                        val uname = document.getString("username") ?: ""
-                        val pImage = document.getString("profile_image") ?: ""
-
-                        if (name.isNotEmpty()) {
-                            fullName = name
-                            prefs.edit().putString("full_name", name).apply()
-                        }
-                        if (uname.isNotEmpty()) {
-                            username = uname
-                            prefs.edit().putString("username", uname).apply()
-                        }
-                        if (pImage.isNotEmpty()) {
-                            profileImageUri = pImage
-                            prefs.edit().putString("profile_image", pImage).apply()
-                        }
-                    }
-                }
-        }
-    }
-
-    // Function to upload image to Firebase Storage and get URL
-    suspend fun uploadImageToFirebase(uri: Uri, identifier: String): String {
-        return try {
-            val storageRef = FirebaseStorage.getInstance().reference
-            val imageRef = storageRef.child("profile_images/$identifier.jpg")
-            imageRef.putFile(uri).await()
-            imageRef.downloadUrl.await().toString()
-        } catch (e: Exception) {
-            e.printStackTrace()
-            ""
-        }
-    }
-
-    val galleryLauncher = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.GetContent()
-    ) { uri: Uri? ->
-        uri?.let {
-            scope.launch {
-                val imageUrl = uploadImageToFirebase(it, userIdentifier)
-                if (imageUrl.isNotEmpty()) {
-                    profileImageUri = imageUrl
-                    prefs.edit().putString("profile_image", imageUrl).apply()
-
-                    // Update in Firestore
-                    user?.uid?.let { uid ->
-                        com.google.firebase.firestore.FirebaseFirestore.getInstance()
-                            .collection("users").document(uid).update("profile_image", imageUrl)
-                            .addOnFailureListener { e ->
-                                Toast.makeText(
-                                    context,
-                                    "Firebase update failed: ${e.message}",
-                                    Toast.LENGTH_SHORT
-                                ).show()
-                            }
-                    }
-                }
-            }
-        }
-    }
-
-    val storageUsage = remember {
-        try {
-            val stat = android.os.StatFs(android.os.Environment.getDataDirectory().path)
-            val total = stat.totalBytes
-            val free = stat.availableBytes
-            val used = total - free
-            if (total > 0) ((used * 100) / total).toInt() else 85
-        } catch (e: Exception) {
-            85
-        }
-    }
-
-
-    Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .padding(horizontal = dimensionResource(id = R.dimen.screen_padding))
-    ) {
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .verticalScroll(rememberScrollState()),
-            horizontalAlignment = Alignment.CenterHorizontally
-        ) {
-            Spacer(modifier = Modifier.height(32.dp))
-
-            // Profile Section from Image
-            Box(contentAlignment = Alignment.BottomEnd) {
-                Surface(
-                    modifier = Modifier.size(100.dp),
-                    shape = RoundedCornerShape(20.dp),
-                    color = Color(0xFF1C222B),
-                    border = BorderStroke(1.dp, Color.White.copy(alpha = 0.1f))
-                ) {
-                    if (!profileImageUri.isNullOrEmpty()) {
-                        SubcomposeAsyncImage(
-                            model = profileImageUri,
-                            contentDescription = "Profile Image",
-                            modifier = Modifier.fillMaxSize(),
-                            contentScale = ContentScale.Crop,
-                            loading = {
-                                Box(
-                                    modifier = Modifier.fillMaxSize(),
-                                    contentAlignment = Alignment.Center
-                                ) {
-                                    CircularProgressIndicator(
-                                        modifier = Modifier.size(24.dp),
-                                        color = Color(0xFF77AEFF),
-                                        strokeWidth = 2.dp
-                                    )
-                                }
-                            },
-                            error = {
-                                Icon(
-                                    imageVector = Icons.Default.Person,
-                                    contentDescription = null,
-                                    modifier = Modifier
-                                        .size(48.dp)
-                                        .padding(20.dp),
-                                    tint = Color.White.copy(alpha = 0.4f)
-                                )
-                            })
-                    } else {
-                        Icon(
-                            imageVector = Icons.Default.Person,
-                            contentDescription = null,
-                            modifier = Modifier
-                                .size(48.dp)
-                                .padding(20.dp),
-                            tint = Color.White.copy(alpha = 0.4f)
-                        )
-                    }
-                }
-
-                Surface(
-                    modifier = Modifier
-                        .size(28.dp)
-                        .offset(x = 6.dp, y = 6.dp)
-                        .clickable { galleryLauncher.launch("image/*") },
-                    shape = CircleShape,
-                    color = Color(0xFFC5C6CD),
-                    border = BorderStroke(2.dp, Color(0xFF0E1116))
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.Edit,
-                        contentDescription = null,
-                        modifier = Modifier.padding(6.dp),
-                        tint = Color(0xFF1B1F26)
-                    )
-                }
-            }
-
-            Spacer(modifier = Modifier.height(16.dp))
-
-            Text(
-                text = fullName,
-                color = Color.White,
-                fontSize = 22.sp,
-                fontWeight = FontWeight.Bold,
-                modifier = Modifier.clickable {
-                    newName = fullName
-                    showNameDialog = true
-                })
-
-            if (username.isNotEmpty()) {
-                Text(
-                    text = "($username)",
-                    color = textGrey,
-                    fontSize = 14.sp,
-                    modifier = Modifier.padding(top = 2.dp)
-                )
-            }
-
-            Text(
-                text = userIdentifier,
-                color = textGrey.copy(alpha = 0.6f),
-                fontSize = 12.sp,
-                modifier = Modifier
-                    .padding(top = 2.dp)
-                    .clickable {
-                        updatedEmail = user?.email ?: ""
-                        isVerificationSent = false
-                        showEmailDialog = true
-                    })
-
-            Spacer(modifier = Modifier.height(32.dp))
-
-            if (showNameDialog) {
-                AlertDialog(
-                    onDismissRequest = { showNameDialog = false },
-                    title = { Text("Update Name", color = Color.White) },
-                    text = {
-                        OutlinedTextField(
-                            value = newName,
-                            onValueChange = { newName = it },
-                            label = { Text("Full Name") },
-                            singleLine = true,
-                            colors = OutlinedTextFieldDefaults.colors(
-                                focusedTextColor = Color.White,
-                                unfocusedTextColor = Color.White,
-                                focusedBorderColor = Color.White,
-                                unfocusedBorderColor = Color.White.copy(alpha = 0.5f)
-                            )
-                        )
-                    },
-                    confirmButton = {
-                        TextButton(onClick = {
-                            if (newName.isNotEmpty()) {
-                                fullName = newName
-                                prefs.edit().putString("full_name", newName).apply()
-
-                                // Update in Firestore
-                                user?.uid?.let { uid ->
-                                    com.google.firebase.firestore.FirebaseFirestore.getInstance()
-                                        .collection("users").document(uid).update("name", newName)
-                                }
-
-                                showNameDialog = false
-                            }
-                        }) {
-                            Text("Save", color = Color(0xFF77AEFF))
-                        }
-                    },
-                    dismissButton = {
-                        TextButton(onClick = { showNameDialog = false }) {
-                            Text("Cancel", color = Color.Gray)
-                        }
-                    },
-                    containerColor = Color(0xFF1B1F26)
-                )
-            }
-
-            if (showEmailDialog) {
-                AlertDialog(
-                    onDismissRequest = { showEmailDialog = false },
-                    title = { Text("Update Email", color = Color.White) },
-                    text = {
-                        Column {
-                            if (!isVerificationSent) {
-                                OutlinedTextField(
-                                    value = updatedEmail,
-                                    onValueChange = { updatedEmail = it },
-                                    label = { Text("New Email Address") },
-                                    singleLine = true,
-                                    modifier = Modifier.fillMaxWidth(),
-                                    colors = OutlinedTextFieldDefaults.colors(
-                                        focusedTextColor = Color.White,
-                                        unfocusedTextColor = Color.White,
-                                        focusedBorderColor = Color.White,
-                                        unfocusedBorderColor = Color.White.copy(alpha = 0.5f)
-                                    )
-                                )
-                                Spacer(modifier = Modifier.height(8.dp))
-                                Text(
-                                    "We will send a verification link to this email.",
-                                    color = textGrey,
-                                    fontSize = 12.sp
-                                )
-                            } else {
-                                Text(
-                                    "Verification link sent to $updatedEmail. Please verify it in your inbox and then click 'Update'.",
-                                    color = Color.White,
-                                    fontSize = 14.sp
-                                )
-                            }
-                        }
-                    },
-                    confirmButton = {
-                        TextButton(onClick = {
-                            if (!isVerificationSent) {
-                                if (updatedEmail.isNotEmpty() && android.util.Patterns.EMAIL_ADDRESS.matcher(
-                                        updatedEmail
-                                    ).matches()
-                                ) {
-                                    scope.launch {
-                                        try {
-                                            // Using verifyBeforeUpdateEmail if supported
-                                            user?.verifyBeforeUpdateEmail(updatedEmail)?.await()
-                                            isVerificationSent = true
-                                            Toast.makeText(
-                                                context,
-                                                "Verification email sent",
-                                                Toast.LENGTH_SHORT
-                                            ).show()
-                                        } catch (e: Exception) {
-                                            val message = e.message ?: ""
-                                            if (message.contains(
-                                                    "recent-login", ignoreCase = true
-                                                ) || message.contains(
-                                                    "sensitive-operation", ignoreCase = true
-                                                )
-                                            ) {
-                                                showReauthDialog = true
-                                            } else {
-                                                Toast.makeText(
-                                                    context,
-                                                    "Error: ${e.message}",
-                                                    Toast.LENGTH_SHORT
-                                                ).show()
-                                            }
-                                        }
-                                    }
-                                } else {
-                                    Toast.makeText(
-                                        context, "Invalid email address", Toast.LENGTH_SHORT
-                                    ).show()
-                                }
-                            } else {
-                                // User claims they verified
-                                scope.launch {
-                                    try {
-                                        val auth = FirebaseAuth.getInstance()
-                                        auth.currentUser?.reload()?.await()
-                                        val currentUser = auth.currentUser
-
-                                        // In verifyBeforeUpdateEmail, the user.email changes to updatedEmail ONLY AFTER verification
-                                        if (currentUser?.email == updatedEmail) {
-                                            // Update Firestore
-                                            currentUser.uid.let { uid ->
-                                                com.google.firebase.firestore.FirebaseFirestore.getInstance()
-                                                    .collection("users").document(uid)
-                                                    .update("email", updatedEmail)
-                                                    .addOnSuccessListener {
-                                                        Toast.makeText(
-                                                            context,
-                                                            "Email updated successfully in profile!",
-                                                            Toast.LENGTH_SHORT
-                                                        ).show()
-                                                        showEmailDialog = false
-                                                    }.addOnFailureListener { e ->
-                                                        Toast.makeText(
-                                                            context,
-                                                            "Firestore update failed: ${e.message}",
-                                                            Toast.LENGTH_SHORT
-                                                        ).show()
-                                                    }
-                                            }
-                                        } else {
-                                            Toast.makeText(
-                                                context,
-                                                "Please verify your email address first (Check: ${currentUser?.email})",
-                                                Toast.LENGTH_LONG
-                                            ).show()
-                                        }
-                                    } catch (e: Exception) {
-                                        Toast.makeText(
-                                            context, "Error: ${e.message}", Toast.LENGTH_SHORT
-                                        ).show()
-                                    }
-                                }
-                            }
-                        }) {
-                            Text(
-                                if (isVerificationSent) "Update" else "Send Link",
-                                color = Color(0xFF77AEFF)
-                            )
-                        }
-                    },
-                    dismissButton = {
-                        TextButton(onClick = { showEmailDialog = false }) {
-                            Text("Cancel", color = Color.Gray)
-                        }
-                    },
-                    containerColor = Color(0xFF1B1F26)
-                )
-            }
-
-            if (showReauthDialog) {
-                AlertDialog(
-                    onDismissRequest = { showReauthDialog = false },
-                    title = { Text("Confirm Identity", color = Color.White) },
-                    text = {
-                        Column {
-                            Text(
-                                "Please enter your current password to proceed with the email update.",
-                                color = textGrey,
-                                fontSize = 14.sp
-                            )
-                            Spacer(modifier = Modifier.height(16.dp))
-                            OutlinedTextField(
-                                value = reauthPassword,
-                                onValueChange = { reauthPassword = it },
-                                label = { Text("Password") },
-                                singleLine = true,
-                                modifier = Modifier.fillMaxWidth(),
-                                visualTransformation = androidx.compose.ui.text.input.PasswordVisualTransformation(),
-                                keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(
-                                    keyboardType = androidx.compose.ui.text.input.KeyboardType.Password
-                                ),
-                                colors = OutlinedTextFieldDefaults.colors(
-                                    focusedTextColor = Color.White,
-                                    unfocusedTextColor = Color.White,
-                                    focusedBorderColor = Color.White,
-                                    unfocusedBorderColor = Color.White.copy(alpha = 0.5f)
-                                )
-                            )
-                        }
-                    },
-                    confirmButton = {
-                        TextButton(onClick = {
-                            if (reauthPassword.isNotEmpty()) {
-                                scope.launch {
-                                    try {
-                                        val credential =
-                                            com.google.firebase.auth.EmailAuthProvider.getCredential(
-                                                user?.email ?: "", reauthPassword
-                                            )
-                                        user?.reauthenticate(credential)?.await()
-                                        showReauthDialog = false
-                                        reauthPassword = ""
-                                        // Retry the update
-                                        user?.verifyBeforeUpdateEmail(updatedEmail)?.await()
-                                        isVerificationSent = true
-                                        Toast.makeText(
-                                            context,
-                                            "Re-authenticated! Verification email sent.",
-                                            Toast.LENGTH_SHORT
-                                        ).show()
-                                    } catch (e: Exception) {
-                                        Toast.makeText(
-                                            context,
-                                            "Re-authentication failed: ${e.message}",
-                                            Toast.LENGTH_SHORT
-                                        ).show()
-                                    }
-                                }
-                            }
-                        }) {
-                            Text("Verify", color = Color(0xFF77AEFF))
-                        }
-                    },
-                    dismissButton = {
-                        TextButton(onClick = { showReauthDialog = false }) {
-                            Text("Cancel", color = Color.Gray)
-                        }
-                    },
-                    containerColor = Color(0xFF1B1F26)
-                )
-            }
-
-            // Account Security Card (matching image style)
-            SettingsItem(
-                Icons.Outlined.Security,
-                "Account Security",
-                "2FA enabled, Password updated 30d ago",
-                onClick = {})
-
-            // Subscription Plan Card (PRO)
-            SettingsItem(
-                Icons.Outlined.CardMembership,
-                "Subscription Plan",
-                "Cloud Storage (30 days) • 4K AI Analytics",
-                proBadge = true,
-                onClick = {})
-
-            Spacer(modifier = Modifier.height(16.dp))
-
-            // Linked Devices Section (matching image)
-            LinkedDevicesSection(navController)
-
-            Spacer(modifier = Modifier.height(24.dp))
-
-            Text(
-                text = stringResource(id = R.string.preferences_security),
-                color = textGrey,
-                fontSize = with(density) { dimensionResource(id = R.dimen.text_micro).toSp() },
-                fontWeight = FontWeight.Bold,
-                modifier = Modifier.fillMaxWidth()
-            )
-            Spacer(modifier = Modifier.height(dimensionResource(id = R.dimen.spacer_medium)))
-
-            SettingsItem(
-                Icons.Outlined.Notifications,
-                stringResource(id = R.string.notifications),
-                "Motion alerts, System health, Daily recaps",
-                onClick = {
-                    val intent = Intent()
-                    if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
-                        intent.action = Settings.ACTION_ALL_APPS_NOTIFICATION_SETTINGS
-                        intent.putExtra(Settings.EXTRA_APP_PACKAGE, context.packageName)
-                    } else {
-                        intent.action = "android.settings.APP_NOTIFICATION_SETTINGS"
-                        intent.putExtra("app_package", context.packageName)
-                        intent.putExtra("app_uid", context.applicationInfo.uid)
-                    }
-                    context.startActivity(intent)
-                },
-            )
-
-            val currentLang = LocaleHelper.getLanguage(context) ?: "en"
-            val langName = when (currentLang) {
-                "hi" -> stringResource(id = R.string.hindi)
-                "gu" -> stringResource(id = R.string.gujarati)
-                "es" -> stringResource(id = R.string.spanish)
-                "fr" -> stringResource(id = R.string.french)
-                "de" -> stringResource(id = R.string.german)
-                "it" -> stringResource(id = R.string.italian)
-                "pt" -> stringResource(id = R.string.portuguese)
-                "ru" -> stringResource(id = R.string.russian)
-                "zh" -> stringResource(id = R.string.chinese_simplified)
-                "ja" -> stringResource(id = R.string.japanese)
-                "ko" -> stringResource(id = R.string.korean)
-                "ar" -> stringResource(id = R.string.arabic)
-                "tr" -> stringResource(id = R.string.turkish)
-                "nl" -> stringResource(id = R.string.dutch)
-                "pl" -> stringResource(id = R.string.polish)
-                "sv" -> stringResource(id = R.string.swedish)
-                "no" -> stringResource(id = R.string.norwegian)
-                "da" -> stringResource(id = R.string.danish)
-                "fi" -> stringResource(id = R.string.finnish)
-                "el" -> stringResource(id = R.string.greek)
-                "iw" -> stringResource(id = R.string.hebrew)
-                "th" -> stringResource(id = R.string.thai)
-                "vi" -> stringResource(id = R.string.vietnamese)
-                "id" -> stringResource(id = R.string.indonesian)
-                "ms" -> stringResource(id = R.string.malay)
-                "cs" -> stringResource(id = R.string.czech)
-                "hu" -> stringResource(id = R.string.hungarian)
-                "ro" -> stringResource(id = R.string.romanian)
-                "sk" -> stringResource(id = R.string.slovak)
-                "uk" -> stringResource(id = R.string.ukrainian)
-                "zh-rTW" -> stringResource(id = R.string.chinese_traditional)
-                else -> stringResource(id = R.string.english)
-            }
-
-            SettingsItem(
-                Icons.Outlined.Language,
-                stringResource(id = R.string.language),
-                langName,
-                onClick = {
-                    navController.navigate("language_selection")
-                },
-            )
-            SettingsItem(
-                Icons.Outlined.Storage,
-                stringResource(id = R.string.manage_storage),
-                stringResource(id = R.string.storage_full_label, "$storageUsage%"),
-                showChevron = true,
-                subColor = if (storageUsage > 80) Color(0xFFE57373) else textGrey,
-                onClick = {
-                    try {
-                        val intent = Intent(Settings.ACTION_MEMORY_CARD_SETTINGS)
-                        context.startActivity(intent)
-                    } catch (e: Exception) {
-                        try {
-                            val intent = Intent(Settings.ACTION_DEVICE_INFO_SETTINGS)
-                            context.startActivity(intent)
-                        } catch (ex: Exception) {
-                            Toast.makeText(
-                                context, "Could not open storage settings", Toast.LENGTH_SHORT
-                            ).show()
-                        }
-                    }
-                })
-
-            Spacer(modifier = Modifier.height(dimensionResource(id = R.dimen.screen_padding)))
-            Text(
-                text = stringResource(id = R.string.support_information),
-                color = textGrey,
-                fontSize = with(density) { dimensionResource(id = R.dimen.text_micro).toSp() },
-                fontWeight = FontWeight.Bold,
-                modifier = Modifier.fillMaxWidth()
-            )
-            Spacer(modifier = Modifier.height(dimensionResource(id = R.dimen.spacer_medium)))
-
-            SettingsItem(
-                Icons.Outlined.HelpOutline,
-                stringResource(id = R.string.how_to_use),
-                onClick = {
-                    navController.navigate("sentinel_guide")
-                },
-            )
-            SettingsItem(
-                Icons.Outlined.PrivacyTip,
-                stringResource(id = R.string.privacy_policy),
-                onClick = {
-                    navController.navigate("privacy_policy")
-                },
-            )
-            SettingsItem(
-                Icons.Outlined.ErrorOutline,
-                stringResource(id = R.string.report_problem),
-                onClick = {
-                    val intent = Intent(Intent.ACTION_SENDTO).apply {
-                        data = Uri.parse("mailto:info@hacksec.ai")
-                    }
-                    context.startActivity(intent)
-                },
-            )
-
-            Spacer(modifier = Modifier.height(dimensionResource(id = R.dimen.spacer_large)))
-
-            Button(
-                onClick = {
-                    navController.navigate("sign_out_confirmation")
-                },
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(56.dp),
-                shape = RoundedCornerShape(12.dp),
-                colors = ButtonDefaults.buttonColors(
-                    containerColor = Color(0xFF2D1619), // Dark reddish background as per image
-                    contentColor = Color(0xFFFF8A80) // Reddish text/icon color
-                )
-            ) {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.Center
-                ) {
-                    Icon(
-                        imageVector = Icons.AutoMirrored.Filled.Logout,
-                        contentDescription = null,
-                        modifier = Modifier.size(20.dp)
-                    )
-                    Spacer(modifier = Modifier.width(12.dp))
-                    Text(
-                        text = stringResource(id = R.string.sign_out),
-                        fontSize = 16.sp,
-                        fontWeight = FontWeight.SemiBold
-                    )
-                }
-            }
-
-            Spacer(modifier = Modifier.height(dimensionResource(id = R.dimen.spacer_large)))
-        }
-
-    }
-}
-
-@Composable
-fun SettingsItem(
+fun SettingsOptionItem(
     icon: ImageVector,
     title: String,
     subtitle: String? = null,
@@ -5365,15 +4587,17 @@ fun BottomNavigationBar(selectedItem: Int, onItemSelected: (Int) -> Unit) {
 
     val items = listOf(
         stringResource(id = R.string.dashboard),
-        stringResource(id = R.string.records),
         stringResource(id = R.string.devices),
-        stringResource(id = R.string.settings)
+        "PREMIUM",
+        stringResource(id = R.string.records),
+        stringResource(id = R.string.alerts)
     )
     val icons = listOf(
-        ImageVector.vectorResource(id = R.drawable.gridview),
-        ImageVector.vectorResource(id = R.drawable.folder),
-        ImageVector.vectorResource(id = R.drawable.videocam),
-        ImageVector.vectorResource(id = R.drawable.setting_icon)
+        Icons.Default.GridView,
+        Icons.Default.Videocam,
+        Icons.Default.Star,
+        Icons.Default.Folder,
+        Icons.Default.Notifications
     )
 
     Surface(

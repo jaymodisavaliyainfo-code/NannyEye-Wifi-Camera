@@ -351,54 +351,89 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
     private val _ipCameraVideos = MutableLiveData<List<VideoRecord>>(emptyList())
     val ipCameraVideos: LiveData<List<VideoRecord>> = _ipCameraVideos
 
+    private val _snapshots = MutableLiveData<List<VideoRecord>>(emptyList())
+    val snapshots: LiveData<List<VideoRecord>> = _snapshots
+
     fun refreshVideoRecords(filterDate: Date? = null) {
         viewModelScope.launch {
             _isLoadingVideos.value = true
             withContext(Dispatchers.IO) {
                 val downloadDir = File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS), "Sentinel Video")
-                if (!downloadDir.exists()) {
-                    _videoRecords.postValue(emptyList())
-                    _recordVideos.postValue(emptyList())
-                    _monitorVideos.postValue(emptyList())
-                    _ipCameraVideos.postValue(emptyList())
-                    return@withContext
-                }
+                val picturesDir = File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_PICTURES), "Sentinel Captures")
+                
+                // 1. Fetch Videos
+                var videoFiles = if (downloadDir.exists()) {
+                    downloadDir.listFiles { file ->
+                        val extensions = listOf("mp4", "mkv", "3gp", "webm", "avi", "m4a")
+                        extensions.any { ext -> file.extension.equals(ext, ignoreCase = true) }
+                    }?.toList() ?: emptyList()
+                } else emptyList()
 
-                var files = downloadDir.listFiles { file ->
-                    val extensions = listOf("mp4", "mkv", "3gp", "webm", "avi", "m4a")
-                    extensions.any { ext -> file.extension.equals(ext, ignoreCase = true) }
-                }?.toList() ?: emptyList()
+                // 2. Fetch Snapshots (Images)
+                var snapshotFiles = if (picturesDir.exists()) {
+                    picturesDir.listFiles { file ->
+                        val extensions = listOf("jpg", "jpeg", "png")
+                        extensions.any { ext -> file.extension.equals(ext, ignoreCase = true) }
+                    }?.toList() ?: emptyList()
+                } else emptyList()
 
                 if (filterDate != null) {
                     val sdf = SimpleDateFormat("yyyyMMdd", Locale.getDefault())
                     val filterDateStr = sdf.format(filterDate)
-                    files = files.filter {
+                    videoFiles = videoFiles.filter {
+                        val fileDateStr = sdf.format(Date(it.lastModified()))
+                        fileDateStr == filterDateStr
+                    }
+                    snapshotFiles = snapshotFiles.filter {
                         val fileDateStr = sdf.format(Date(it.lastModified()))
                         fileDateStr == filterDateStr
                     }
                 }
 
-                files = files.sortedByDescending { it.lastModified() }
+                videoFiles = videoFiles.sortedByDescending { it.lastModified() }
+                snapshotFiles = snapshotFiles.sortedByDescending { it.lastModified() }
 
-                val allRecords = files.map { file -> createVideoRecord(file) }
+                val allVideoRecords = videoFiles.map { file -> createVideoRecord(file) }
+                val allSnapshotRecords = snapshotFiles.map { file -> createSnapshotRecord(file) }
 
                 // Categorize
                 // 1. Ip Camera: Starts with RTSP_
-                val ipVideos = allRecords.filter { it.name.startsWith("RTSP_") }
+                val ipVideos = allVideoRecords.filter { it.name.startsWith("RTSP_") }
 
                 // 2. Monitor Videos: Ends with .m4a or starts with MON_
-                val monitorVids = allRecords.filter { it.file.extension == "m4a" || it.name.startsWith("MON_") }
+                val monitorVids = allVideoRecords.filter { it.file.extension == "m4a" || it.name.startsWith("MON_") }
 
                 // 3. Record Videos (Phone): Starts with REC_ and is NOT a monitor video
-                val phoneVids = allRecords.filter { it.name.startsWith("REC_") && it.file.extension != "m4a" && !it.name.startsWith("MON_") }
+                val phoneVids = allVideoRecords.filter { it.name.startsWith("REC_") && it.file.extension != "m4a" && !it.name.startsWith("MON_") }
 
-                _videoRecords.postValue(allRecords)
+                _videoRecords.postValue(allVideoRecords)
                 _recordVideos.postValue(phoneVids)
                 _monitorVideos.postValue(monitorVids)
                 _ipCameraVideos.postValue(ipVideos)
+                _snapshots.postValue(allSnapshotRecords)
             }
             _isLoadingVideos.value = false
         }
+    }
+
+    private fun createSnapshotRecord(file: File): VideoRecord {
+        val date = Date(file.lastModified())
+        val formatter = SimpleDateFormat("dd MMM yyyy, HH:mm", Locale.getDefault())
+        val formattedDate = formatter.format(date)
+        
+        var bitmap: Bitmap? = null
+        try {
+            bitmap = android.graphics.BitmapFactory.decodeFile(file.absolutePath)
+        } catch (e: Exception) {}
+
+        return VideoRecord(
+            file = file,
+            name = file.name,
+            formattedDate = formattedDate,
+            duration = "Image",
+            thumbnail = bitmap,
+            size = "${(file.length() / 1024)} KB"
+        )
     }
 
     private fun createVideoRecord(file: File): VideoRecord {

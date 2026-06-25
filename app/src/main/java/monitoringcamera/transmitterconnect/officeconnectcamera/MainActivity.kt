@@ -440,6 +440,12 @@ fun AppNavigation() {
                 viewModel = cameraViewModel
             )
         }
+        detailScreen("account_settings") { _ ->
+            AccountSettingsScreen(navController = navController)
+        }
+        detailScreen("preferences") { _ ->
+            PreferencesScreen(navController = navController)
+        }
     }
 }
 
