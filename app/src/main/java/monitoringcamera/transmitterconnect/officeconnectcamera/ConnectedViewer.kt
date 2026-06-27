@@ -3,8 +3,8 @@ package monitoringcamera.transmitterconnect.officeconnectcamera
 import androidx.room.Entity
 import androidx.room.PrimaryKey
 
-@Entity(tableName = "paired_devices")
-data class PairedDevice(
+@Entity(tableName = "connected_viewers")
+data class ConnectedViewer(
     @PrimaryKey
     val deviceId: String = "",
     val sessionId: String = "",
@@ -13,10 +13,9 @@ data class PairedDevice(
     val peerId: String = "",
     val name: String = "",
     val model: String = "",
-    val status: String = "offline", // "online" or "offline"
-    val connectionStatus: String = "Disconnected", // "Connected" or "Disconnected"
+    val status: String = "offline",
+    val connectionStatus: String = "Disconnected",
     val lastConnectedTime: Long = 0L,
     val lastSeen: Long = 0L,
-    val timestamp: Long = 0L,
-    val role: String = "receiver" // "monitor" or "receiver"
+    val timestamp: Long = 0L
 )

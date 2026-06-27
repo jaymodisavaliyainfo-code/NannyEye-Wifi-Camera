@@ -9,10 +9,22 @@ import android.content.pm.PackageManager
 import android.net.Uri
 import android.provider.Settings
 import android.util.Log
-import android.widget.Toast
+import android.view.ViewGroup
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.camera.core.CameraControl
+import androidx.camera.core.CameraSelector
+import androidx.camera.core.ImageAnalysis
+import androidx.camera.core.Preview
+import androidx.camera.lifecycle.ProcessCameraProvider
+import androidx.camera.view.PreviewView
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -23,12 +35,14 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
@@ -46,61 +60,56 @@ import androidx.compose.material.icons.automirrored.filled.Logout
 import androidx.compose.material.icons.automirrored.outlined.HelpOutline
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Adjust
-import androidx.compose.material.icons.filled.CalendarToday
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Devices
-import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.FlashOff
+import androidx.compose.material.icons.filled.FlashOn
 import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.GridView
 import androidx.compose.material.icons.filled.History
+import androidx.compose.material.icons.filled.Keyboard
 import androidx.compose.material.icons.filled.KeyboardArrowDown
-import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material.icons.filled.Laptop
+import androidx.compose.material.icons.filled.Mic
+import androidx.compose.material.icons.filled.MicOff
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Notifications
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.PlayCircle
 import androidx.compose.material.icons.filled.Podcasts
+import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Router
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Settings
-import androidx.compose.material.icons.filled.Shield
+import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.filled.Smartphone
 import androidx.compose.material.icons.filled.Star
 import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material.icons.filled.Videocam
 import androidx.compose.material.icons.filled.VideocamOff
 import androidx.compose.material.icons.filled.Visibility
-import androidx.compose.material.icons.outlined.CardMembership
 import androidx.compose.material.icons.outlined.ErrorOutline
-import androidx.compose.material.icons.outlined.HelpOutline
 import androidx.compose.material.icons.outlined.Language
 import androidx.compose.material.icons.outlined.Notifications
 import androidx.compose.material.icons.outlined.PrivacyTip
-import androidx.compose.material.icons.outlined.Security
 import androidx.compose.material.icons.outlined.Shield
-import androidx.compose.material.icons.outlined.Storage
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
-import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DatePicker
-import androidx.compose.material3.DatePickerDefaults
 import androidx.compose.material3.DatePickerDialog
+import androidx.compose.material3.DrawerValue
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.FilterChip
-import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
-import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.ModalDrawerSheet
 import androidx.compose.material3.ModalNavigationDrawer
 import androidx.compose.material3.OutlinedTextField
@@ -111,9 +120,8 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
-import androidx.compose.material3.DrawerValue
-import androidx.compose.material3.rememberDrawerState
 import androidx.compose.material3.rememberDatePickerState
+import androidx.compose.material3.rememberDrawerState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -134,11 +142,13 @@ import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.res.dimensionResource
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
@@ -147,6 +157,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.viewinterop.AndroidView
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import androidx.core.app.ActivityCompat
@@ -154,53 +165,23 @@ import androidx.core.content.ContextCompat
 import androidx.navigation.NavController
 import coil.compose.SubcomposeAsyncImage
 import com.google.firebase.Timestamp
-import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.database.DataSnapshot
 import com.google.firebase.database.DatabaseError
 import com.google.firebase.database.FirebaseDatabase
 import com.google.firebase.database.ValueEventListener
-import com.google.firebase.storage.FirebaseStorage
-import kotlinx.coroutines.launch
-import kotlinx.coroutines.tasks.await
-import java.io.File
-import java.text.SimpleDateFormat
-import java.util.Date
-import java.util.Locale
-import androidx.camera.core.CameraControl
-import androidx.camera.core.CameraSelector
-import androidx.camera.core.ImageAnalysis
-import androidx.camera.core.Preview
-import androidx.camera.lifecycle.ProcessCameraProvider
-import androidx.camera.view.PreviewView
-import androidx.compose.animation.core.LinearEasing
-import androidx.compose.animation.core.RepeatMode
-import androidx.compose.animation.core.animateFloat
-import androidx.compose.animation.core.infiniteRepeatable
-import androidx.compose.animation.core.rememberInfiniteTransition
-import androidx.compose.animation.core.tween
-import androidx.compose.foundation.Canvas
-import androidx.compose.foundation.layout.fillMaxHeight
-import androidx.compose.foundation.layout.statusBarsPadding
-import androidx.compose.material.icons.filled.FlashOff
-import androidx.compose.material.icons.filled.FlashOn
-import androidx.compose.material.icons.filled.Keyboard
-import androidx.compose.material.icons.filled.Mic
-import androidx.compose.material.icons.filled.MicOff
-import androidx.compose.ui.graphics.drawscope.Stroke
-import androidx.compose.ui.platform.LocalLifecycleOwner
-import androidx.compose.ui.viewinterop.AndroidView
 import com.google.mlkit.vision.barcode.BarcodeScannerOptions
 import com.google.mlkit.vision.barcode.BarcodeScanning
 import com.google.mlkit.vision.barcode.common.Barcode
 import com.google.mlkit.vision.common.InputImage
-import java.util.concurrent.Executors
+import kotlinx.coroutines.launch
 import org.json.JSONObject
 import org.webrtc.SurfaceViewRenderer
 import org.webrtc.VideoSink
-import android.view.ViewGroup
-import android.widget.FrameLayout
-import androidx.compose.material.icons.filled.Refresh
-import androidx.compose.ui.graphics.drawscope.Fill
+import java.io.File
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
+import java.util.concurrent.Executors
 
 @Composable
 fun DrawerMenuItem(
@@ -316,7 +297,9 @@ fun SettingsDrawerContent(
                     }
                 }
                 Surface(
-                    modifier = Modifier.size(16.dp).offset(x = 4.dp, y = 4.dp),
+                    modifier = Modifier
+                        .size(16.dp)
+                        .offset(x = 4.dp, y = 4.dp),
                     shape = CircleShape,
                     color = Color(0xFFBBC6E2),
                     border = BorderStroke(2.dp, Color(0xFF0E1116))
@@ -330,7 +313,9 @@ fun SettingsDrawerContent(
                     Icons.AutoMirrored.Filled.ArrowForward,
                     contentDescription = "Close",
                     tint = Color.White,
-                    modifier = Modifier.rotate(180f).size(20.dp)
+                    modifier = Modifier
+                        .rotate(180f)
+                        .size(20.dp)
                 )
             }
         }
@@ -362,17 +347,17 @@ fun SettingsDrawerContent(
             DrawerMenuItem(
                 icon = Icons.Default.Person,
                 title = "Account",
-                onClick = { 
+                onClick = {
                     onClose()
-                    navController.navigate("account_settings") 
+                    navController.navigate("account_settings")
                 }
             )
             DrawerMenuItem(
                 icon = Icons.Default.Tune,
                 title = "Preferences",
-                onClick = { 
+                onClick = {
                     onClose()
-                    navController.navigate("preferences") 
+                    navController.navigate("preferences")
                 }
             )
             DrawerMenuItem(
@@ -431,14 +416,16 @@ fun SettingsDrawerContent(
             )
 
             Spacer(modifier = Modifier.height(32.dp))
-            
+
             Text(
                 text = "NANNYEYE OS • V2.4.1",
                 color = Color.White.copy(alpha = 0.2f),
                 fontSize = 11.sp,
                 fontWeight = FontWeight.Bold,
                 textAlign = TextAlign.Center,
-                modifier = Modifier.fillMaxWidth().padding(bottom = 24.dp)
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(bottom = 24.dp)
             )
         }
     }
@@ -457,6 +444,70 @@ fun MainScreen(
     val darkBackground = Color(0xFF0E1116)
     val drawerState = rememberDrawerState(initialValue = DrawerValue.Closed)
 
+    var showQrDialog by remember { mutableStateOf(false) }
+    val qrBitmap by viewModel.qrBitmap.observeAsState()
+    val isConnected by viewModel.getSessionConnectionState(viewModel.sessionId.observeAsState("").value).observeAsState(false)
+    val reconnectRequest by viewModel.incomingReconnectRequest.observeAsState()
+
+    // Handle Reconnect Request dialog
+    reconnectRequest?.let { request ->
+        AlertDialog(
+            onDismissRequest = { viewModel.declineReconnect() },
+            title = { Text("Reconnect Monitor", color = Color.White) },
+            text = {
+                Text(
+                    "${request["hostName"]} wants to reconnect to the previous monitoring session.",
+                    color = Color.White
+                )
+            },
+            confirmButton = {
+                Button(onClick = {
+                    val sId = request["sessionId"] ?: ""
+                    val requestId = request["requestId"] ?: ""
+                    if (requestId.isNotEmpty()) {
+                        viewModel.acceptFirestoreReconnectRequest(requestId)
+                    }
+                    viewModel.activePreviewDeviceName.value = request["hostName"] ?: "Remote Camera"
+                    viewModel.startViewing(sId)
+                    coroutineScope.launch {
+                        pagerState.animateScrollToPage(0)
+                    }
+                }) {
+                    Text("Accept")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = {
+                    val requestId = request["requestId"] ?: ""
+                    if (requestId.isNotEmpty()) {
+                        viewModel.declineFirestoreReconnectRequest(requestId)
+                    } else {
+                        viewModel.declineReconnect()
+                    }
+                }) {
+                    Text("Decline", color = Color.Red)
+                }
+            },
+            containerColor = Color(0xFF1B1F26),
+            titleContentColor = Color.White,
+            textContentColor = Color.White
+        )
+    }
+
+    // Close QR dialog automatically when connected
+    LaunchedEffect(isConnected) {
+        if (isConnected && showQrDialog) {
+            showQrDialog = false
+        }
+    }
+
+    // Start streaming when QR dialog is shown
+    LaunchedEffect(showQrDialog) {
+        if (showQrDialog) {
+            viewModel.startStreaming(null, false)
+        }
+    }
+
     LaunchedEffect(Unit) {
         linkedDevicesViewModel.updateActivity()
     }
@@ -474,7 +525,9 @@ fun MainScreen(
             ModalDrawerSheet(
                 drawerContainerColor = Color(0xFF0E1116),
                 drawerTonalElevation = 0.dp,
-                modifier = Modifier.width(320.dp).fillMaxHeight()
+                modifier = Modifier
+                    .width(320.dp)
+                    .fillMaxHeight()
             ) {
                 SettingsDrawerContent(
                     navController = navController,
@@ -487,7 +540,7 @@ fun MainScreen(
     ) {
         Scaffold(
             containerColor = darkBackground, bottomBar = {
-                BottomNavigationBar(pagerState.currentPage) { index ->
+                BottomNavigationBar(pagerState.currentPage, viewModel) { index ->
                     coroutineScope.launch {
                         pagerState.animateScrollToPage(index)
                     }
@@ -510,10 +563,18 @@ fun MainScreen(
                         onProfileClick = { coroutineScope.launch { drawerState.open() } }
                     )
 
-                    1 -> DevicesContent(navController, viewModel)
+                    1 -> DevicesContent(navController, viewModel, onNavigateToDashboard = {
+                        coroutineScope.launch {
+                            pagerState.animateScrollToPage(0)
+                        }
+                    })
                     2 -> PremiumContent()
                     3 -> RecordsContent(navController)
-                    4 -> AlertsContent()
+                    4 -> AlertsContent(
+                        viewModel = viewModel,
+                        authViewModel = authViewModel,
+                        onProfileClick = { coroutineScope.launch { drawerState.open() } }
+                    )
                 }
             }
         }
@@ -528,60 +589,184 @@ fun PremiumContent() {
 }
 
 @Composable
-fun AlertsContent() {
-    val density = LocalDensity.current
+fun AlertsContent(
+    viewModel: CameraViewModel = androidx.lifecycle.viewmodel.compose.viewModel(),
+    authViewModel: AuthViewModel = androidx.lifecycle.viewmodel.compose.viewModel(),
+    onProfileClick: () -> Unit = {}
+) {
+    val context = LocalContext.current
     val textGrey = Color(0xFF9CA3AF)
-    
+
+    var searchQuery by remember { mutableStateOf("") }
+    var selectedFilter by remember { mutableStateOf("ALL") }
+    val filters = listOf("ALL", "PEOPLE", "PETS", "VEHICLE", "MOTION", "SYSTEM")
+
+    val user by authViewModel.user.collectAsState()
+    val fullName = remember(user) {
+        val prefs = context.getSharedPreferences("app_prefs", Context.MODE_PRIVATE)
+        prefs.getString("full_name", user?.displayName ?: "User") ?: "User"
+    }
+    val profileImageUri = remember(user) {
+        val prefs = context.getSharedPreferences("app_prefs", Context.MODE_PRIVATE)
+        prefs.getString("profile_image", "")
+    }
+
     Column(
         modifier = Modifier
             .fillMaxSize()
             .padding(horizontal = 24.dp)
     ) {
+        // 1. Header
         Row(
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(vertical = 16.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            Text(
-                text = "NannyEye",
-                color = Color.White,
-                fontSize = 14.sp,
-                fontWeight = FontWeight.Bold,
-                letterSpacing = 1.sp
-            )
+            Surface(
+                modifier = Modifier
+                    .size(40.dp)
+                    .clickable { onProfileClick() },
+                shape = RoundedCornerShape(10.dp),
+                color = Color(0xFF1C222B)
+            ) {
+                if (!profileImageUri.isNullOrEmpty()) {
+                    SubcomposeAsyncImage(
+                        model = profileImageUri,
+                        contentDescription = "Profile Image",
+                        modifier = Modifier.fillMaxSize(),
+                        contentScale = ContentScale.Crop
+                    )
+                } else {
+                    Icon(
+                        Icons.Default.Person,
+                        contentDescription = null,
+                        tint = Color.White.copy(alpha = 0.6f),
+                        modifier = Modifier.padding(8.dp)
+                    )
+                }
+            }
+            Spacer(modifier = Modifier.width(12.dp))
+            Column {
+                Text(
+                    text = "NannyEye",
+                    color = Color.White,
+                    fontSize = 20.sp,
+                    fontWeight = FontWeight.Bold
+                )
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text(
+                            text = "NO NEW ALERTS",
+                            color = textGrey,
+                            fontSize = 10.sp,
+                            fontWeight = FontWeight.Bold,
+                            letterSpacing = 0.5.sp
+                        )
+                }
+            }
         }
 
-        Text(
-            text = "Alerts",
-            color = Color.White,
-            fontSize = 32.sp,
-            fontWeight = FontWeight.Bold
-        )
-        Text(
-            text = "Security notifications",
-            color = textGrey,
-            fontSize = 12.sp,
-            fontWeight = FontWeight.Bold,
-            letterSpacing = 1.sp
-        )
+        Spacer(modifier = Modifier.height(16.dp))
 
-        Spacer(modifier = Modifier.height(32.dp))
-
-        Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-            Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                Icon(
-                    Icons.Outlined.Notifications,
-                    contentDescription = null,
-                    tint = textGrey.copy(alpha = 0.3f),
-                    modifier = Modifier.size(64.dp)
-                )
-                Spacer(modifier = Modifier.height(16.dp))
+        // 2. Search Bar
+        OutlinedTextField(
+            value = searchQuery,
+            onValueChange = { searchQuery = it },
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(56.dp),
+            placeholder = {
                 Text(
-                    text = "No alerts recorded today",
+                    "Search alerts, cameras, or events...",
                     color = textGrey,
                     fontSize = 14.sp
                 )
+            },
+            leadingIcon = {
+                Icon(
+                    Icons.Default.Search,
+                    null,
+                    tint = textGrey,
+                    modifier = Modifier.size(20.dp)
+                )
+            },
+            trailingIcon = {
+                Icon(
+                    Icons.Default.Tune,
+                    null,
+                    tint = textGrey,
+                    modifier = Modifier.size(20.dp)
+                )
+            },
+            shape = RoundedCornerShape(12.dp),
+            colors = OutlinedTextFieldDefaults.colors(
+                focusedContainerColor = Color(0xFF161B22),
+                unfocusedContainerColor = Color(0xFF161B22),
+                focusedBorderColor = Color.Transparent,
+                unfocusedBorderColor = Color.Transparent,
+                focusedTextColor = Color.White,
+                unfocusedTextColor = Color.White
+            ),
+            singleLine = true
+        )
+
+        Spacer(modifier = Modifier.height(24.dp))
+
+        // 3. Filters
+        LazyRow(
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            items(filters) { filter ->
+                AlertFilterChip(
+                    text = filter,
+                    count = 0,
+                    isSelected = selectedFilter == filter,
+                    onClick = { selectedFilter = filter }
+                )
+            }
+        }
+
+        Spacer(modifier = Modifier.height(24.dp))
+    }
+}
+
+@Composable
+fun AlertFilterChip(text: String, count: Int, isSelected: Boolean, onClick: () -> Unit) {
+    Surface(
+        modifier = Modifier
+            .clickable { onClick() }
+            .height(36.dp),
+        color = if (isSelected) Color(0xFF1B263B) else Color(0xFF161B22),
+        shape = RoundedCornerShape(10.dp),
+        border = if (isSelected) null else BorderStroke(1.dp, Color.White.copy(alpha = 0.05f))
+    ) {
+        Row(
+            modifier = Modifier.padding(horizontal = 16.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.Center
+        ) {
+            Text(
+                text = text,
+                color = if (isSelected) Color(0xFF77AEFF) else Color(0xFF9CA3AF),
+                fontSize = 11.sp,
+                fontWeight = FontWeight.Bold,
+                letterSpacing = 0.5.sp
+            )
+            if (count > 0) {
+                Spacer(modifier = Modifier.width(6.dp))
+                Surface(
+                    color = (if (isSelected) Color(0xFF77AEFF) else Color(0xFF9CA3AF)).copy(alpha = 0.1f),
+                    shape = CircleShape
+                ) {
+                    Text(
+                        text = count.toString(),
+                        color = if (isSelected) Color(0xFF77AEFF) else Color(0xFF9CA3AF),
+                        fontSize = 9.sp,
+                        fontWeight = FontWeight.Bold,
+                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                    )
+                }
             }
         }
     }
@@ -617,17 +802,19 @@ fun DashboardContent(
     val activeSessions = remember { mutableStateListOf<String>() }
     val savedDevices by viewModel.savedDevices.observeAsState(emptyList())
     val videoRecords by viewModel.videoRecords.observeAsState(emptyList())
+    val savedViewers by viewModel.savedViewers.observeAsState(emptyList())
     val onlineMonitors by viewModel.onlineMonitors.observeAsState(emptyMap())
     val myDeviceId by viewModel.myDeviceId.observeAsState("")
-    val isConnected by viewModel.isConnected.observeAsState(false)
-    val isBroadcasting by viewModel.isBroadcasting.observeAsState(false)
-    val isRemoteConnected by viewModel.isRemoteConnected.observeAsState(false)
     val sessionId by viewModel.sessionId.observeAsState("")
+    val isConnected by viewModel.getSessionConnectionState(sessionId).observeAsState(false)
+    val isBroadcasting by viewModel.isBroadcasting.observeAsState(false)
+    val activePreviewSessionId by viewModel.activePreviewSessionId.observeAsState(null)
+    val isRemoteConnected by viewModel.getSessionConnectionState(activePreviewSessionId ?: "")
+        .observeAsState(false)
     val qrBitmap by viewModel.qrBitmap.observeAsState()
     val cameraActivities by viewModel.cameraActivities.observeAsState(emptyList())
     val connectedViewers by viewModel.connectedViewers.observeAsState(emptyList())
 
-    val activePreviewSessionId by viewModel.activePreviewSessionId.observeAsState(null)
     val activePreviewDeviceName by viewModel.activePreviewDeviceName.observeAsState("")
 
     var showQrDialog by remember { mutableStateOf(false) }
@@ -652,6 +839,7 @@ fun DashboardContent(
                     viewModel.generateHostSession()
                     showQrDialog = true
                 }
+
                 "add_camera" -> {
                     showAddCameraDialog = true
                 }
@@ -687,6 +875,7 @@ fun DashboardContent(
                     viewModel.generateHostSession()
                     showQrDialog = true
                 }
+
                 "add_camera" -> {
                     showAddCameraDialog = true
                 }
@@ -753,7 +942,9 @@ fun DashboardContent(
             verticalAlignment = Alignment.CenterVertically
         ) {
             Surface(
-                modifier = Modifier.size(48.dp).clickable { onProfileClick() },
+                modifier = Modifier
+                    .size(48.dp)
+                    .clickable { onProfileClick() },
                 shape = RoundedCornerShape(12.dp),
                 color = Color(0xFF1C222B)
             ) {
@@ -818,8 +1009,8 @@ fun DashboardContent(
             )
             StatCard(
                 title = "ALERTS\nTODAY",
-                count = "0",
-                subtitle = "Motion events",
+                count = "Count",
+                subtitle = "Detection events",
                 icon = Icons.Outlined.Notifications,
                 iconColor = Color(0xFFFF8A65),
                 modifier = Modifier.weight(1f)
@@ -872,7 +1063,12 @@ fun DashboardContent(
                     modifier = Modifier.height(32.dp),
                     shape = RoundedCornerShape(8.dp)
                 ) {
-                    Text("MANAGE", fontSize = 10.sp, color = Color.White, fontWeight = FontWeight.Bold)
+                    Text(
+                        "MANAGE",
+                        fontSize = 10.sp,
+                        color = Color.White,
+                        fontWeight = FontWeight.Bold
+                    )
                 }
             }
         }
@@ -931,9 +1127,9 @@ fun DashboardContent(
             modifier = Modifier.fillMaxWidth()
         ) {
             item {
-                val isBroadcasting = sessionId.isNotEmpty()
+                val isBroadcastingCard = isBroadcasting || sessionId.isNotEmpty()
                 ThisDeviceCard(
-                    isBroadcasting = isBroadcasting,
+                    isBroadcasting = isBroadcastingCard,
                     isConnected = isConnected,
                     sessionId = sessionId,
                     viewModel = viewModel,
@@ -990,7 +1186,9 @@ fun DashboardContent(
                 Icons.Default.Add,
                 contentDescription = null,
                 tint = Color.White.copy(alpha = 0.6f),
-                modifier = Modifier.size(20.dp).clickable { navController.navigate("all_devices_screen") }
+                modifier = Modifier
+                    .size(20.dp)
+                    .clickable { navController.navigate("all_devices_screen") }
             )
         }
 
@@ -1001,11 +1199,22 @@ fun DashboardContent(
             shape = RoundedCornerShape(24.dp),
             colors = CardDefaults.cardColors(containerColor = Color(0xFF1B1F25))
         ) {
-            // Show the 3 most recent peer devices regardless of current session state
-            // to ensure both Camera and Monitor devices can see their history.
-            if (savedDevices.isEmpty()) {
+            val combinedRecent = remember(savedDevices, savedViewers) {
+                val data = mutableListOf<Map<String, Any>>()
+                savedDevices.forEach {
+                    data.add(mapOf("id" to it.deviceId, "name" to it.name, "time" to it.timestamp, "role" to it.role, "sid" to it.sessionId))
+                }
+                savedViewers.forEach {
+                    data.add(mapOf("id" to it.deviceId, "name" to it.name, "time" to it.timestamp, "role" to "viewer", "sid" to it.sessionId))
+                }
+                data.sortedByDescending { it["time"] as Long }.take(3)
+            }
+
+            if (combinedRecent.isEmpty()) {
                 Box(
-                    modifier = Modifier.fillMaxWidth().padding(24.dp),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(24.dp),
                     contentAlignment = Alignment.Center
                 ) {
                     Text(
@@ -1015,20 +1224,29 @@ fun DashboardContent(
                     )
                 }
             } else {
-                savedDevices.take(3).forEach { device ->
-                    val isLive = onlineMonitors[device.deviceId]?.sessionId == device.sessionId
+                combinedRecent.forEach { deviceMap ->
+                    val dId = deviceMap["id"] as String
+                    val name = deviceMap["name"] as String
+                    val timestamp = deviceMap["time"] as Long
+                    val role = deviceMap["role"] as String
+                    val sid = deviceMap["sid"] as String
+
+                    val isLive = if (role == "viewer") {
+                        connectedViewers.any { it.deviceId == dId }
+                    } else {
+                        onlineMonitors[dId]?.sessionId == sid
+                    }
+
                     DeviceRowItem(
-                        name = device.name,
-                        timestamp = device.timestamp,
+                        name = name,
+                        timestamp = timestamp,
                         status = if (isLive) "ONLINE" else "OFFLINE",
                         onActivate = {
                             if (isLive) {
-                                // If it's a camera we joined, navigate to viewer
-                                // If it's a viewer that joined us, navigate to camera view
-                                if (device.role == "camera") {
-                                    navController.navigate("viewer/${Uri.encode(device.sessionId)}")
+                                if (role == "viewer") {
+                                    navController.navigate("camera_view/${Uri.encode(sid)}")
                                 } else {
-                                    navController.navigate("camera_view/${Uri.encode(device.sessionId)}")
+                                    navController.navigate("viewer/${Uri.encode(sid)}")
                                 }
                             }
                         }
@@ -1065,7 +1283,9 @@ fun DashboardContent(
 
         if (cameraActivities.isEmpty()) {
             Box(
-                modifier = Modifier.fillMaxWidth().padding(24.dp),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(24.dp),
                 contentAlignment = Alignment.Center
             ) {
                 Text(
@@ -1087,7 +1307,9 @@ fun DashboardContent(
 
             if (filteredActivities.isEmpty()) {
                 Box(
-                    modifier = Modifier.fillMaxWidth().padding(24.dp),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(24.dp),
                     contentAlignment = Alignment.Center
                 ) {
                     Text(
@@ -1167,11 +1389,23 @@ fun DashboardContent(
             onNavigateToPlayerScreen = { ip, port, user, pass, path, name ->
                 showIPCameraSetupDialog = false
                 val encodedPath = path.replace("/", "|")
-                navController.navigate("player/${Uri.encode(ip)}/$port/${Uri.encode(user)}/${Uri.encode(pass)}/${Uri.encode(encodedPath)}/${Uri.encode(name)}")
+                navController.navigate(
+                    "player/${Uri.encode(ip)}/$port/${Uri.encode(user)}/${
+                        Uri.encode(
+                            pass
+                        )
+                    }/${Uri.encode(encodedPath)}/${Uri.encode(name)}"
+                )
             },
             onNavigateToMultiChannel = { ip, port, user, pass, channels, main, brand ->
                 showIPCameraSetupDialog = false
-                navController.navigate("multi_channel/${Uri.encode(ip)}/$port/${Uri.encode(user)}/${Uri.encode(pass)}/$channels/$main/$brand")
+                navController.navigate(
+                    "multi_channel/${Uri.encode(ip)}/$port/${Uri.encode(user)}/${
+                        Uri.encode(
+                            pass
+                        )
+                    }/$channels/$main/$brand"
+                )
             }
         )
     }
@@ -1329,7 +1563,9 @@ fun StatCard(
         colors = CardDefaults.cardColors(containerColor = Color(0xFF161B22))
     ) {
         Column(
-            modifier = Modifier.padding(16.dp).fillMaxSize(),
+            modifier = Modifier
+                .padding(16.dp)
+                .fillMaxSize(),
             verticalArrangement = Arrangement.SpaceBetween
         ) {
             Row(
@@ -1394,11 +1630,11 @@ fun ThisDeviceCard(
     Card(
         modifier = Modifier
             .size(width = cardWidth, height = cardHeight)
-            .clickable(enabled = isBroadcasting && isConnected) { onCardClick() },
+            .clickable(enabled = isBroadcasting) { onCardClick() },
         shape = RoundedCornerShape(24.dp),
         colors = CardDefaults.cardColors(containerColor = Color(0xFF161B22))
     ) {
-        if (isBroadcasting && isConnected) {
+        if (isBroadcasting) {
             Box(modifier = Modifier.fillMaxSize()) {
                 var localSink by remember { mutableStateOf<VideoSink?>(null) }
 
@@ -1430,7 +1666,9 @@ fun ThisDeviceCard(
                 )
 
                 // Overlays
-                Box(modifier = Modifier.fillMaxSize().padding(8.dp)) {
+                Box(modifier = Modifier
+                    .fillMaxSize()
+                    .padding(8.dp)) {
                     Row(
                         modifier = Modifier.align(Alignment.TopStart),
                         verticalAlignment = Alignment.CenterVertically,
@@ -1439,19 +1677,22 @@ fun ThisDeviceCard(
                         // 1. Live Indicator (Red if connected, Gray if just sharing)
                         Row(
                             modifier = Modifier
-                                .background(Color.Black.copy(alpha = 0.5f), RoundedCornerShape(12.dp))
+                                .background(
+                                    Color.Black.copy(alpha = 0.5f),
+                                    RoundedCornerShape(12.dp)
+                                )
                                 .padding(horizontal = 8.dp, vertical = 4.dp),
                             verticalAlignment = Alignment.CenterVertically
                         ) {
                             Canvas(modifier = Modifier.size(6.dp)) {
                                 drawCircle(
-                                    color = Color.Red,
+                                    color = if (isConnected) Color.Red else Color.Gray,
                                     radius = size.minDimension / 2
                                 )
                             }
                             Spacer(modifier = Modifier.width(4.dp))
                             Text(
-                                "LIVE",
+                                if (isConnected) "LIVE" else "WAITING",
                                 color = Color.White,
                                 fontSize = 10.sp,
                                 fontWeight = FontWeight.Bold
@@ -1501,7 +1742,7 @@ fun ThisDeviceCard(
 
                     // 5. Stop Button (Small close icon in bottom right)
                     IconButton(
-                        onClick = { viewModel.stopAll() },
+                        onClick = { viewModel.stopStreaming() },
                         modifier = Modifier
                             .align(Alignment.BottomEnd)
                             .size(24.dp)
@@ -1514,53 +1755,26 @@ fun ThisDeviceCard(
                             modifier = Modifier.size(14.dp)
                         )
                     }
-                }
-            }
-        } else if (isBroadcasting && !isConnected) {
-            // "Waiting for connection" state
-            Column(
-                modifier = Modifier
-                    .padding(16.dp)
-                    .fillMaxSize(),
-                horizontalAlignment = Alignment.CenterHorizontally,
-                verticalArrangement = Arrangement.Center
-            ) {
-                Surface(
-                    modifier = Modifier.size(48.dp),
-                    shape = RoundedCornerShape(12.dp),
-                    color = Color(0xFF1B232D)
-                ) {
-                    CircularProgressIndicator(
-                        modifier = Modifier.padding(12.dp),
-                        color = Color(0xFF77AEFF),
-                        strokeWidth = 2.dp
-                    )
-                }
-                Spacer(modifier = Modifier.height(16.dp))
-                Text(
-                    text = "Waiting...",
-                    color = Color.White,
-                    fontSize = 16.sp,
-                    fontWeight = FontWeight.Bold
-                )
-                Spacer(modifier = Modifier.height(4.dp))
-                Text(
-                    text = "Broadcasting session $sessionId. Scan the QR code on the monitor device to connect.",
-                    color = Color(0xFF9CA3AF),
-                    fontSize = 11.sp,
-                    textAlign = TextAlign.Center,
-                    lineHeight = 14.sp
-                )
-                Spacer(modifier = Modifier.height(16.dp))
-                Button(
-                    onClick = { viewModel.stopAll() },
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(40.dp),
-                    shape = RoundedCornerShape(10.dp),
-                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF2D1619))
-                ) {
-                    Text("Stop Broadcasting", color = Color(0xFFFF8A80), fontWeight = FontWeight.Bold, fontSize = 12.sp)
+
+                    // 6. Waiting Overlay (if not connected, show a subtle prompt)
+                    if (!isConnected) {
+                        Box(
+                            modifier = Modifier.fillMaxSize(),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Surface(
+                                color = Color.Black.copy(alpha = 0.4f),
+                                shape = RoundedCornerShape(12.dp)
+                            ) {
+                                Text(
+                                    "Waiting for viewers...",
+                                    color = Color.White.copy(alpha = 0.8f),
+                                    fontSize = 11.sp,
+                                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp)
+                                )
+                            }
+                        }
+                    }
                 }
             }
         } else {
@@ -1577,58 +1791,40 @@ fun ThisDeviceCard(
                     color = Color(0xFF1B232D)
                 ) {
                     Icon(
-                        ImageVector.vectorResource(id = R.drawable.round_img),
-                        contentDescription = null,
-                        tint = Color.White.copy(alpha = 0.6f),
+                        Icons.Default.Videocam,
+                        contentDescription = "Start",
+                        tint = Color(0xFF77AEFF),
                         modifier = Modifier.padding(12.dp)
                     )
                 }
                 Spacer(modifier = Modifier.height(16.dp))
                 Text(
-                    text = "This device",
+                    text = "Connect Camera",
                     color = Color.White,
                     fontSize = 16.sp,
                     fontWeight = FontWeight.Bold
                 )
                 Spacer(modifier = Modifier.height(4.dp))
                 Text(
-                    text = "Use this phone as a camera — share it to another device.",
+                    text = "Broadcast this device to a monitor",
                     color = Color(0xFF9CA3AF),
-                    fontSize = 11.sp,
-                    textAlign = TextAlign.Center,
-                    lineHeight = 14.sp
+                    fontSize = 11.sp
                 )
                 Spacer(modifier = Modifier.height(16.dp))
                 Button(
-                    onClick = onStartCamera,
+                    onClick = { onStartCamera() },
                     modifier = Modifier
                         .fillMaxWidth()
                         .height(40.dp),
                     shape = RoundedCornerShape(10.dp),
-                    colors = ButtonDefaults.buttonColors(containerColor = Color.Transparent),
-                    contentPadding = PaddingValues()
+                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF1D2939))
                 ) {
-                    Box(
-                        modifier = Modifier
-                            .fillMaxSize()
-                            .background(
-                                brush = Brush.horizontalGradient(
-                                    colors = listOf(Color(0xFFBBC6E2), Color(0xFF1B263B))
-                                )
-                            ),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Icon(
-                                Icons.Default.Videocam,
-                                contentDescription = null,
-                                tint = Color.Black,
-                                modifier = Modifier.size(16.dp)
-                            )
-                            Spacer(modifier = Modifier.width(6.dp))
-                            Text("Start camera", color = Color.Black, fontWeight = FontWeight.Bold, fontSize = 12.sp)
-                        }
-                    }
+                    Text(
+                        "Start Camera",
+                        color = Color.White,
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 12.sp
+                    )
                 }
             }
         }
@@ -1684,7 +1880,9 @@ fun RemoteDeviceCard(
             )
 
             // Overlays
-            Box(modifier = Modifier.fillMaxSize().padding(8.dp)) {
+            Box(modifier = Modifier
+                .fillMaxSize()
+                .padding(8.dp)) {
                 Row(
                     modifier = Modifier.align(Alignment.TopStart),
                     verticalAlignment = Alignment.CenterVertically,
@@ -1747,7 +1945,9 @@ fun RemoteDeviceCard(
 @Composable
 fun AddCameraCard(onClick: () -> Unit) {
     Card(
-        modifier = Modifier.size(width = 240.dp, height = 300.dp).clickable { onClick() },
+        modifier = Modifier
+            .size(width = 240.dp, height = 300.dp)
+            .clickable { onClick() },
         shape = RoundedCornerShape(32.dp),
         colors = CardDefaults.cardColors(containerColor = Color(0xFF0E1116)),
         border = BorderStroke(1.dp, Color.White.copy(alpha = 0.05f))
@@ -1790,13 +1990,16 @@ fun DeviceRowItem(name: String, timestamp: Long, status: String, onActivate: () 
     }
 
     Card(
-        modifier = Modifier.fillMaxWidth()
+        modifier = Modifier
+            .fillMaxWidth()
             .padding(10.dp),
         shape = RoundedCornerShape(24.dp),
         colors = CardDefaults.cardColors(containerColor = Color(0xFF161B22))
     ) {
         Row(
-            modifier = Modifier.padding(16.dp).fillMaxWidth(),
+            modifier = Modifier
+                .padding(16.dp)
+                .fillMaxWidth(),
             verticalAlignment = Alignment.CenterVertically
         ) {
             Surface(
@@ -1831,7 +2034,7 @@ fun DeviceRowItem(name: String, timestamp: Long, status: String, onActivate: () 
                     letterSpacing = 0.5.sp
                 )
             }
-            
+
             // Status Capsule
             Surface(
                 color = Color(0xFF1B232D).copy(alpha = 0.5f),
@@ -1840,13 +2043,15 @@ fun DeviceRowItem(name: String, timestamp: Long, status: String, onActivate: () 
             ) {
                 Text(
                     text = status,
-                    color = if (status == "ONLINE") Color(0xFF4CAF50) else Color(0xFF9CA3AF).copy(alpha = 0.6f),
+                    color = if (status == "ONLINE") Color(0xFF4CAF50) else Color(0xFF9CA3AF).copy(
+                        alpha = 0.6f
+                    ),
                     fontSize = 9.sp,
                     fontWeight = FontWeight.Bold,
                     modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp)
                 )
             }
-            
+
             Button(
                 onClick = onActivate,
                 colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF1B232D)),
@@ -1854,7 +2059,12 @@ fun DeviceRowItem(name: String, timestamp: Long, status: String, onActivate: () 
                 modifier = Modifier.height(36.dp),
                 shape = RoundedCornerShape(10.dp)
             ) {
-                Text("Activate", fontSize = 12.sp, color = Color.White, fontWeight = FontWeight.Bold)
+                Text(
+                    "Activate",
+                    fontSize = 12.sp,
+                    color = Color.White,
+                    fontWeight = FontWeight.Bold
+                )
             }
         }
     }
@@ -1955,23 +2165,32 @@ fun UpgradeToMaxCard() {
             Spacer(modifier = Modifier.height(24.dp))
             Button(
                 onClick = { /* Upgrade */ },
-                modifier = Modifier.fillMaxWidth().height(48.dp),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(48.dp),
                 shape = RoundedCornerShape(12.dp),
                 colors = ButtonDefaults.buttonColors(containerColor = Color.Transparent),
                 contentPadding = PaddingValues()
             ) {
                 Box(
-                    modifier = Modifier.fillMaxSize().background(
-                        brush = Brush.horizontalGradient(
-                            colors = listOf(Color(0xFFBBC6E2), Color(0xFF1B263B))
-                        )
-                    ),
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .background(
+                            brush = Brush.horizontalGradient(
+                                colors = listOf(Color(0xFFBBC6E2), Color(0xFF1B263B))
+                            )
+                        ),
                     contentAlignment = Alignment.Center
                 ) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Text("SEE MAX", color = Color.Black, fontWeight = FontWeight.Bold)
                         Spacer(modifier = Modifier.width(8.dp))
-                        Icon(Icons.AutoMirrored.Filled.ArrowForward, null, tint = Color.Black, modifier = Modifier.size(16.dp))
+                        Icon(
+                            Icons.AutoMirrored.Filled.ArrowForward,
+                            null,
+                            tint = Color.Black,
+                            modifier = Modifier.size(16.dp)
+                        )
                     }
                 }
             }
@@ -2763,7 +2982,7 @@ fun RecordsContent(
     var selectedMediaType by remember { mutableStateOf("ALL MEDIA") }
     var selectedCamera by remember { mutableStateOf("ALL CAMERAS") }
     var selectedTime by remember { mutableStateOf("ANY TIME") }
-    
+
     var showDatePicker by remember { mutableStateOf(false) }
     var showMediaTypeMenu by remember { mutableStateOf(false) }
     var showCameraMenu by remember { mutableStateOf(false) }
@@ -2786,7 +3005,10 @@ fun RecordsContent(
             val matchesSearch = record.name.contains(searchQuery, ignoreCase = true)
             val matchesCamera = when (selectedCamera) {
                 "ALL CAMERAS" -> true
-                "RECORD" -> record.name.startsWith("REC_") && record.file.extension != "m4a" && !record.name.startsWith("MON_")
+                "RECORD" -> record.name.startsWith("REC_") && record.file.extension != "m4a" && !record.name.startsWith(
+                    "MON_"
+                )
+
                 "MONITOR" -> record.file.extension == "m4a" || record.name.startsWith("MON_")
                 "IP CAMERA" -> record.name.startsWith("RTSP_")
                 else -> record.name.contains(selectedCamera, ignoreCase = true)
@@ -2800,7 +3022,10 @@ fun RecordsContent(
             val matchesSearch = record.name.contains(searchQuery, ignoreCase = true)
             val matchesCamera = when (selectedCamera) {
                 "ALL CAMERAS" -> true
-                "RECORD" -> record.name.startsWith("REC_") && record.file.extension != "m4a" && !record.name.startsWith("MON_")
+                "RECORD" -> record.name.startsWith("REC_") && record.file.extension != "m4a" && !record.name.startsWith(
+                    "MON_"
+                )
+
                 "MONITOR" -> record.file.extension == "m4a" || record.name.startsWith("MON_")
                 "IP CAMERA" -> record.name.startsWith("RTSP_")
                 else -> record.name.contains(selectedCamera, ignoreCase = true)
@@ -2809,11 +3034,12 @@ fun RecordsContent(
         }
     }
 
-    val storagePermission = if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU) {
-        Manifest.permission.READ_MEDIA_VIDEO
-    } else {
-        Manifest.permission.READ_EXTERNAL_STORAGE
-    }
+    val storagePermission =
+        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU) {
+            Manifest.permission.READ_MEDIA_VIDEO
+        } else {
+            Manifest.permission.READ_EXTERNAL_STORAGE
+        }
 
     val storagePermissionLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.RequestPermission()
@@ -2822,7 +3048,11 @@ fun RecordsContent(
     }
 
     LaunchedEffect(Unit) {
-        if (ContextCompat.checkSelfPermission(context, storagePermission) == PackageManager.PERMISSION_GRANTED) {
+        if (ContextCompat.checkSelfPermission(
+                context,
+                storagePermission
+            ) == PackageManager.PERMISSION_GRANTED
+        ) {
             viewModel.refreshVideoRecords()
         } else {
             storagePermissionLauncher.launch(storagePermission)
@@ -2889,8 +3119,22 @@ fun RecordsContent(
                 .fillMaxWidth()
                 .height(56.dp),
             placeholder = { Text("Search recordings...", color = textGrey, fontSize = 14.sp) },
-            leadingIcon = { Icon(Icons.Default.Search, null, tint = textGrey, modifier = Modifier.size(20.dp)) },
-            trailingIcon = { Icon(Icons.Default.Tune, null, tint = textGrey, modifier = Modifier.size(20.dp)) },
+            leadingIcon = {
+                Icon(
+                    Icons.Default.Search,
+                    null,
+                    tint = textGrey,
+                    modifier = Modifier.size(20.dp)
+                )
+            },
+            trailingIcon = {
+                Icon(
+                    Icons.Default.Tune,
+                    null,
+                    tint = textGrey,
+                    modifier = Modifier.size(20.dp)
+                )
+            },
             shape = RoundedCornerShape(16.dp),
             colors = OutlinedTextFieldDefaults.colors(
                 focusedContainerColor = cardBackground,
@@ -2975,7 +3219,9 @@ fun RecordsContent(
                     TextButton(onClick = {
                         datePickerState.selectedDateMillis?.let { millis ->
                             val date = Date(millis)
-                            selectedTime = SimpleDateFormat("MMM dd", Locale.getDefault()).format(date).uppercase()
+                            selectedTime =
+                                SimpleDateFormat("MMM dd", Locale.getDefault()).format(date)
+                                    .uppercase()
                             viewModel.refreshVideoRecords(date)
                         }
                         showDatePicker = false
@@ -2990,7 +3236,7 @@ fun RecordsContent(
         if (selectedMediaType == "ALL MEDIA" || selectedMediaType == "CLIPS") {
             SectionHeader(title = "Clips", countText = "${filteredClips.size} CAPTURED TODAY")
             Spacer(modifier = Modifier.height(16.dp))
-            
+
             if (filteredClips.isEmpty()) {
                 EmptySectionPlaceholder("No clips found")
             } else {
@@ -3011,7 +3257,10 @@ fun RecordsContent(
 
         // 5. Snapshots Section
         if (selectedMediaType == "ALL MEDIA" || selectedMediaType == "SNAPSHOTS") {
-            SectionHeader(title = "Snapshots", countText = "${filteredSnapshots.size} CAPTURED TODAY")
+            SectionHeader(
+                title = "Snapshots",
+                countText = "${filteredSnapshots.size} CAPTURED TODAY"
+            )
             Spacer(modifier = Modifier.height(16.dp))
 
             if (filteredSnapshots.isEmpty()) {
@@ -3087,7 +3336,13 @@ fun SectionHeader(title: String, countText: String) {
         verticalAlignment = Alignment.CenterVertically
     ) {
         Text(text = title, color = Color.White, fontSize = 20.sp, fontWeight = FontWeight.Bold)
-        Text(text = countText.uppercase(), color = Color(0xFF9CA3AF), fontSize = 10.sp, fontWeight = FontWeight.Bold, letterSpacing = 0.5.sp)
+        Text(
+            text = countText.uppercase(),
+            color = Color(0xFF9CA3AF),
+            fontSize = 10.sp,
+            fontWeight = FontWeight.Bold,
+            letterSpacing = 0.5.sp
+        )
     }
 }
 
@@ -3107,9 +3362,11 @@ fun ClipThumbnail(record: CameraViewModel.VideoRecord, onClick: () -> Unit) {
                 modifier = Modifier.fillMaxSize(),
                 contentScale = ContentScale.Crop
             )
-            Box(modifier = Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.3f)))
+            Box(modifier = Modifier
+                .fillMaxSize()
+                .background(Color.Black.copy(alpha = 0.3f)))
         }
-        
+
         // Duration Tag
         Surface(
             modifier = Modifier
@@ -3132,7 +3389,9 @@ fun ClipThumbnail(record: CameraViewModel.VideoRecord, onClick: () -> Unit) {
             Icons.Default.PlayCircle,
             contentDescription = null,
             tint = Color.White,
-            modifier = Modifier.size(32.dp).align(Alignment.Center)
+            modifier = Modifier
+                .size(32.dp)
+                .align(Alignment.Center)
         )
     }
 }
@@ -3185,333 +3444,695 @@ private fun playMedia(context: Context, file: File, mimeType: String) {
         }
         context.startActivity(intent)
     } catch (e: Exception) {
-        android.widget.Toast.makeText(context, "Cannot open file", android.widget.Toast.LENGTH_SHORT).show()
+        android.widget.Toast.makeText(
+            context,
+            "Cannot open file",
+            android.widget.Toast.LENGTH_SHORT
+        ).show()
     }
 }
 
 
 @Composable
-fun DevicesContent(navController: NavController, viewModel: CameraViewModel) {
+fun DevicesContent(
+    navController: NavController,
+    viewModel: CameraViewModel,
+    onNavigateToDashboard: () -> Unit = {}
+) {
+    val context = LocalContext.current
     val density = LocalDensity.current
     val configuration = LocalConfiguration.current
-    val screenWidthDp = configuration.screenWidthDp.dp
-    val isTablet = configuration.screenWidthDp >= 600
     val textGrey = Color(0xFF9CA3AF)
-    val cardBackground = Color(0xFF1B1F26)
-    val upgradeGradient = Brush.horizontalGradient(
-        colors = listOf(Color(0xFF4A90E2), Color(0xFF50E3C2))
-    )
-    val primaryGradient = Brush.horizontalGradient(
-        colors = listOf(Color(0xFFBBC6E2), Color(0xFF1B263B))
-    )
+    val cardBackground = Color(0xFF161B22)
 
-    val deviceName by viewModel.deviceName.observeAsState("${android.os.Build.MANUFACTURER} ${android.os.Build.MODEL}")
+    val savedDevices by viewModel.savedDevices.observeAsState(emptyList())
+    val savedViewers by viewModel.savedViewers.observeAsState(emptyList())
+    val onlineMonitors by viewModel.onlineMonitors.observeAsState(emptyMap())
     val roomDevices by viewModel.roomDevices.observeAsState(emptyList())
-    var expandedIPDeviceId by remember { mutableStateOf<String?>(null) }
+    val connectedViewers by viewModel.connectedViewers.observeAsState(emptyList())
+    val isBroadcasting by viewModel.isBroadcasting.observeAsState(false)
+    val sessionId by viewModel.sessionId.observeAsState("")
+    val myDeviceId by viewModel.myDeviceId.observeAsState("")
+    val myDeviceName by viewModel.deviceName.observeAsState("${android.os.Build.MANUFACTURER} ${android.os.Build.MODEL}")
 
-    LaunchedEffect(Unit) {
-        // Data is now loaded via Firestore listeners in CameraViewModel
+    val userPrefs = remember { context.getSharedPreferences("app_prefs", Context.MODE_PRIVATE) }
+    val profileImageUri = userPrefs.getString("profile_image", "")
+    val fullName = userPrefs.getString("full_name", "User") ?: "User"
+
+    val monitorDevices = savedDevices.filter { it.role == "monitor" }
+    val activeMonitorsCount = monitorDevices.count { device ->
+        onlineMonitors[device.deviceId]?.sessionId == device.sessionId
     }
 
-    Box(modifier = Modifier.fillMaxSize()) {
-        Column(
+    var showIPCameraSetup by remember { mutableStateOf(false) }
+
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(Color(0xFF0E1116))
+            .padding(horizontal = 24.dp)
+            .verticalScroll(rememberScrollState())
+    ) {
+        // 1. Header
+        Row(
             modifier = Modifier
-                .fillMaxSize()
-                .padding(horizontal = dimensionResource(id = R.dimen.screen_padding))
+                .fillMaxWidth()
+                .padding(vertical = 24.dp),
+            verticalAlignment = Alignment.CenterVertically
         ) {
+            Surface(
+                modifier = Modifier.size(48.dp),
+                shape = RoundedCornerShape(12.dp),
+                color = Color(0xFF1C222B)
+            ) {
+                if (!profileImageUri.isNullOrEmpty()) {
+                    SubcomposeAsyncImage(
+                        model = profileImageUri,
+                        contentDescription = "Profile",
+                        modifier = Modifier.fillMaxSize(),
+                        contentScale = ContentScale.Crop
+                    )
+                } else {
+                    Icon(
+                        Icons.Default.Person,
+                        null,
+                        tint = Color.White.copy(alpha = 0.6f),
+                        modifier = Modifier.padding(10.dp)
+                    )
+                }
+            }
+            Spacer(modifier = Modifier.width(16.dp))
+            Column {
+                Text(
+                    text = "NannyEye",
+                    color = Color.White,
+                    fontSize = 22.sp,
+                    fontWeight = FontWeight.Bold
+                )
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Canvas(modifier = Modifier.size(6.dp)) {
+                        drawCircle(color = Color(0xFFFF8A80))
+                    }
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text(
+                        text = "LIVE • $activeMonitorsCount MONITORS ACTIVE",
+                        color = textGrey,
+                        fontSize = 10.sp,
+                        fontWeight = FontWeight.Bold,
+                        letterSpacing = 0.5.sp
+                    )
+                }
+            }
+        }
+
+        // 2. This device Section
+        SectionHeaderWithAction(
+            title = "This device",
+            actionText = "CURRENT DEVICE",
+            onActionClick = {}
+        )
+        Spacer(modifier = Modifier.height(12.dp))
+        DeviceCardItem(
+            icon = ImageVector.vectorResource(id = R.drawable.smartphone),
+            title = myDeviceName,
+            subtitle = if (isBroadcasting) "SESSION: $sessionId • ACTIVE" else "ID: $myDeviceId • STANDBY",
+            badge = if (isBroadcasting) "ONLINE" else "OFFLINE",
+            badgeColor = if (isBroadcasting) Color(0xFF4CAF50) else textGrey,
+            onClick = {
+                if (isBroadcasting && sessionId.isNotEmpty()) {
+                    navController.navigate("camera_view/${Uri.encode(sessionId)}")
+                }
+            }
+        )
+
+        Spacer(modifier = Modifier.height(32.dp))
+
+        // 3. Monitors Section (Showing Connected Hosts/Monitors)
+        SectionHeaderWithAction(
+            title = "Cameras",
+            subtitle = "${monitorDevices.size} CONNECTED DEVICES",
+            actionContent = {
+                Button(
+                    onClick = { navController.navigate("add_device") },
+                    modifier = Modifier.height(36.dp),
+                    shape = RoundedCornerShape(10.dp),
+                    colors = ButtonDefaults.buttonColors(containerColor = Color.Transparent),
+                    contentPadding = PaddingValues(horizontal = 12.dp)
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxHeight()
+                            .background(
+                                brush = Brush.horizontalGradient(
+                                    listOf(Color(0xFFBBC6E2).copy(alpha = 0.8f), Color(0xFF1B263B).copy(alpha = 0.8f))
+                                ),
+                                shape = RoundedCornerShape(10.dp)
+                            )
+                            .padding(horizontal = 12.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text("+ ADD CAMERA", color = Color.White, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                    }
+                }
+            }
+        )
+        Spacer(modifier = Modifier.height(12.dp))
+
+        if (monitorDevices.isEmpty()) {
+            EmptyStateCard(
+                icon = Icons.Default.Videocam,
+                text = "No monitors connected",
+                subtext = "ADD A MONITOR TO START MONITORING"
+            )
+        } else {
+            monitorDevices.forEach { device ->
+                val onlineInfo = onlineMonitors[device.deviceId]
+                val isLive = onlineInfo != null && onlineInfo.sessionId.isNotEmpty()
+                val currentSessionId = onlineInfo?.sessionId ?: device.sessionId
+
+                CameraRowItem(
+                    name = device.name,
+                    status = if (isLive) "LIVE • $currentSessionId" else "${device.connectionStatus} • LAST SEEN ${formatTimestamp(Timestamp(Date(device.lastSeen)))}",
+                    isLive = isLive,
+                    onActivate = {
+                        if (isLive) {
+                            navController.navigate("viewer/${Uri.encode(currentSessionId)}")
+                        }
+                    },
+                    onDelete = { viewModel.deleteSavedDevice(device.deviceId) },
+                )
+                Spacer(modifier = Modifier.height(8.dp))
+            }
+        }
+
+        Spacer(modifier = Modifier.height(32.dp))
+
+        // 4. Cameras Section (Showing Connected Viewers)
+        SectionHeaderWithAction(
+            title = "Monitors",
+            subtitle = "${savedViewers.size} CONNECTED MONITORS",
+            actionText = "SHARE THIS CAMERA",
+            actionIcon = Icons.Default.Share,
+            onActionClick = { /* Share QR */ }
+        )
+        Spacer(modifier = Modifier.height(12.dp))
+        if (savedViewers.isEmpty()) {
+            EmptyStateCard(
+                icon = Icons.Default.Laptop,
+                text = "No active viewers",
+                subtext = "WATCHING THIS DEVICE"
+            )
+        } else {
+            savedViewers.forEach { viewer ->
+                val isCurrentlyActive = connectedViewers.any { it.deviceId == viewer.deviceId }
+                MonitorRowItem(
+                    name = viewer.name,
+                    status = if (isCurrentlyActive) "SHARING" else viewer.connectionStatus,
+                    subtext = if (isCurrentlyActive) "WATCHING THIS DEVICE" else "LAST SEEN ${formatTimestamp(Timestamp(Date(viewer.lastSeen)))}",
+                    onDisconnect = {
+                        // 1. Stop current sharing/viewing
+                        val sid = viewer.sessionId
+                        viewModel.resumeHostSession(
+                            sid = sid,
+                            rId = viewer.roomId,
+                            hId = viewer.hostId,
+                            targetViewerId = viewer.deviceId
+                        )
+                        // Navigate back to Dashboard
+                        onNavigateToDashboard()
+                    }
+                )
+                Spacer(modifier = Modifier.height(8.dp))
+            }
+        }
+
+        Spacer(modifier = Modifier.height(32.dp))
+
+        // 5. IP Camera Section
+        SectionHeaderWithAction(
+            title = "IP Camera",
+            subtitle = "NETWORK DEVICES",
+            actionText = "Add IP CAMERA",
+            actionIcon = Icons.Default.Add,
+            onActionClick = { showIPCameraSetup = true }
+        )
+        Spacer(modifier = Modifier.height(12.dp))
+        if (roomDevices.isEmpty()) {
+            EmptyStateCard(
+                icon = Icons.Default.Router,
+                text = "No IP cameras detected",
+                subtext = "CHECK YOUR LOCAL NETWORK CONNECTION"
+            )
+        } else {
+            roomDevices.forEach { device ->
+                IPCameraRowItem(
+                    device = device,
+                    navController = navController,
+                    onDelete = { viewModel.deleteRoomDevice(device) }
+                )
+                Spacer(modifier = Modifier.height(8.dp))
+            }
+        }
+
+        Spacer(modifier = Modifier.height(48.dp))
+
+        // Footer
+        Text(
+            text = "NANNYEYE V2.4.8 — STABLE",
+            color = textGrey.copy(alpha = 0.5f),
+            fontSize = 11.sp,
+            fontWeight = FontWeight.Bold,
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(bottom = 32.dp),
+            textAlign = TextAlign.Center,
+            letterSpacing = 1.sp
+        )
+        
+        Spacer(modifier = Modifier.height(80.dp))
+    }
+
+    if (showIPCameraSetup) {
+        IPCameraSetupDialog(
+            onDismiss = { showIPCameraSetup = false },
+            onNavigateToPlayerScreen = { ip, port, user, pass, path, name ->
+                showIPCameraSetup = false
+                val encodedPath = path.replace("/", "|")
+                navController.navigate(
+                    "player/${Uri.encode(ip)}/$port/${Uri.encode(user)}/${
+                        Uri.encode(
+                            pass
+                        )
+                    }/${Uri.encode(encodedPath)}/${Uri.encode(name)}"
+                )
+            },
+            onNavigateToMultiChannel = { ip, port, user, pass, channels, main, brand ->
+                showIPCameraSetup = false
+                navController.navigate(
+                    "multi_channel/${Uri.encode(ip)}/$port/${Uri.encode(user)}/${
+                        Uri.encode(
+                            pass
+                        )
+                    }/$channels/$main/$brand"
+                )
+            },
+            cameraViewModel = viewModel
+        )
+    }
+}
+
+@Composable
+fun SectionHeaderWithAction(
+    title: String,
+    subtitle: String? = null,
+    actionText: String? = null,
+    actionIcon: ImageVector? = null,
+    onActionClick: () -> Unit = {},
+    actionContent: @Composable (() -> Unit)? = null
+) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.Bottom
+    ) {
+        Column {
+            Text(
+                text = title,
+                color = Color.White,
+                fontSize = 18.sp,
+                fontWeight = FontWeight.Bold
+            )
+            if (subtitle != null) {
+                Text(
+                    text = subtitle.uppercase(),
+                    color = Color(0xFF9CA3AF),
+                    fontSize = 10.sp,
+                    fontWeight = FontWeight.Bold,
+                    letterSpacing = 0.5.sp
+                )
+            }
+        }
+        if (actionContent != null) {
+            actionContent()
+        } else if (actionText != null) {
             Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(vertical = dimensionResource(id = R.dimen.spacer_medium)),
+                modifier = Modifier.clickable { onActionClick() },
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Text(
-                    text = stringResource(id = R.string.app_name),
-                    color = Color.White,
-                    fontSize = with(density) { dimensionResource(id = R.dimen.text_small).toSp() },
+                    text = actionText.uppercase(),
+                    color = Color(0xFF9CA3AF),
+                    fontSize = 10.sp,
                     fontWeight = FontWeight.Bold,
-                    letterSpacing = with(density) { dimensionResource(id = R.dimen.letter_spacing_tight).toSp() })
-            }
-
-            Column(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .verticalScroll(rememberScrollState())
-            ) {
-                Text(
-                    text = stringResource(id = R.string.devices),
-                    color = Color.White,
-                    fontSize = with(density) { dimensionResource(id = R.dimen.text_h1).toSp() },
-                    fontWeight = FontWeight.Bold
+                    letterSpacing = 0.5.sp
                 )
-                Text(
-                    text = stringResource(id = R.string.manage_ecosystem),
-                    color = textGrey,
-                    fontSize = with(density) { dimensionResource(id = R.dimen.text_caption).toSp() })
-
-                Spacer(modifier = Modifier.height(dimensionResource(id = R.dimen.screen_padding)))
-
-                /*// Upgrade Card
-                Card(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clickable { },
-                    shape = RoundedCornerShape(dimensionResource(id = R.dimen.radius_medium)),
-                    colors = CardDefaults.cardColors(containerColor = Color.Transparent)
-                ) {
-                    Row(
-                        modifier = Modifier
-                            .background(upgradeGradient)
-                            .padding(dimensionResource(id = R.dimen.card_padding))
-                            .fillMaxWidth(),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text(
-                                stringResource(id = R.string.upgrade_pro),
-                                color = Color.White,
-                                fontSize = with(density) { dimensionResource(id = R.dimen.text_subtitle).toSp() },
-                                fontWeight = FontWeight.Bold
-                            )
-                            Text(
-                                stringResource(id = R.string.upgrade_description),
-                                color = Color.White.copy(alpha = 0.8f),
-                                fontSize = with(density) { dimensionResource(id = R.dimen.text_micro).toSp() })
-                        }
-                        Icon(
-                            Icons.Default.ArrowForward,
-                            null,
-                            tint = Color.White,
-                            modifier = Modifier.size(dimensionResource(id = R.dimen.icon_size_small))
-                        )
-                    }
-                }
-
-                Spacer(modifier = Modifier.height(dimensionResource(id = R.dimen.section_spacing)))*/
-
-                // Monitors Section
-                Text(
-                    stringResource(id = R.string.monitors),
-                    color = textGrey,
-                    fontSize = with(density) { dimensionResource(id = R.dimen.text_micro).toSp() },
-                    fontWeight = FontWeight.Bold,
-                    letterSpacing = with(density) { dimensionResource(id = R.dimen.letter_spacing_tight).toSp() })
-                Spacer(modifier = Modifier.height(dimensionResource(id = R.dimen.spacer_medium)))
-
-                Card(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clickable { navController.navigate("monitor_details") },
-                    shape = RoundedCornerShape(dimensionResource(id = R.dimen.radius_standard)),
-                    colors = CardDefaults.cardColors(containerColor = cardBackground)
-                ) {
-                    Row(
-                        modifier = Modifier.padding(dimensionResource(id = R.dimen.card_padding)),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Box(
-                            modifier = Modifier
-                                .size(dimensionResource(id = R.dimen.option_icon_container))
-                                .clip(RoundedCornerShape(dimensionResource(id = R.dimen.radius_small)))
-                                .background(Color(0xFF31353C)), contentAlignment = Alignment.Center
-                        ) {
-                            Icon(
-                                imageVector = ImageVector.vectorResource(id = R.drawable.smartphone),
-                                contentDescription = null,
-                                tint = Color(0xFF77AEFF),
-                                modifier = Modifier.size(dimensionResource(id = R.dimen.icon_size_medium_small))
-                            )
-                        }
-                        Spacer(modifier = Modifier.width(dimensionResource(id = R.dimen.spacer_medium)))
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text(
-                                text = deviceName,
-                                color = Color.White,
-                                fontSize = with(density) { dimensionResource(id = R.dimen.text_small).toSp() },
-                                fontWeight = FontWeight.Medium
-                            )
-                            Text(
-                                stringResource(id = R.string.active_now),
-                                color = Color(0xFF4CAF50),
-                                fontSize = with(density) { dimensionResource(id = R.dimen.text_micro).toSp() })
-                        }
-                        Icon(
-                            imageVector = Icons.Default.ChevronRight,
-                            contentDescription = null,
-                            tint = Color.White.copy(alpha = 0.3f),
-                            modifier = Modifier.size(dimensionResource(id = R.dimen.icon_size_small))
-                        )
-                    }
-                }
-
-                Spacer(modifier = Modifier.height(dimensionResource(id = R.dimen.section_spacing)))
-
-                // Cameras Section
-                Text(
-                    stringResource(id = R.string.cameras),
-                    color = textGrey,
-                    fontSize = with(density) { dimensionResource(id = R.dimen.text_micro).toSp() },
-                    fontWeight = FontWeight.Bold,
-                    letterSpacing = with(density) { dimensionResource(id = R.dimen.letter_spacing_tight).toSp() })
-                Spacer(modifier = Modifier.height(dimensionResource(id = R.dimen.spacer_medium)))
-
-                if (roomDevices.isEmpty()) {
-
-                    Column(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clip(RoundedCornerShape(dimensionResource(id = R.dimen.radius_medium)))
-                            .background(cardBackground)
-                            .padding(dimensionResource(id = R.dimen.section_spacing)),
-                        horizontalAlignment = Alignment.CenterHorizontally
-                    ) {
-                        Image(
-                            painter = painterResource(id = R.drawable.videocam_of),
-                            contentDescription = null,
-                            modifier = Modifier
-                                .fillMaxWidth(0.5f)
-                                .height(
-                                    if (isTablet) screenWidthDp * 0.15f
-                                    else screenWidthDp * 0.25f
-                                )
-                                .widthIn(max = 200.dp),
-                            contentScale = ContentScale.Fit
-                        )
-                        Spacer(modifier = Modifier.height(dimensionResource(id = R.dimen.screen_padding)))
-                        Text(
-                            stringResource(id = R.string.no_cameras_connected),
-                            color = Color.White,
-                            fontSize = with(density) { dimensionResource(id = R.dimen.text_title).toSp() },
-                            fontWeight = FontWeight.Bold
-                        )
-                        Spacer(modifier = Modifier.height(dimensionResource(id = R.dimen.spacer_small)))
-                        Text(
-                            stringResource(id = R.string.add_camera_monitor_desc),
-                            color = textGrey,
-                            fontSize = with(density) { dimensionResource(id = R.dimen.text_small).toSp() },
-                            textAlign = TextAlign.Center,
-                            lineHeight = with(density) { dimensionResource(id = R.dimen.text_title).toSp() })
-                    }
-                    Spacer(modifier = Modifier.height(dimensionResource(id = R.dimen.screen_padding)))
-                }
-
-                if (roomDevices.isNotEmpty()) {
-                    roomDevices.forEach { device ->
-                        val isExpanded = expandedIPDeviceId == device.id
-                        IPCameraStreamItem(
-                            device = device,
-                            isExpanded = isExpanded,
-                            onExpandToggle = {
-                                expandedIPDeviceId = if (isExpanded) null else device.id
-                            },
-                            navController = navController,
-                            onRemove = { viewModel.deleteRoomDevice(device) })
-                    }
-                }
-
-                Spacer(
-                    modifier = Modifier.height(
-                        dimensionResource(id = R.dimen.bottom_nav_height).times(
-                            1.2f
-                        )
+                if (actionIcon != null) {
+                    Spacer(modifier = Modifier.width(4.dp))
+                    Icon(
+                        imageVector = actionIcon,
+                        contentDescription = null,
+                        tint = Color(0xFF9CA3AF),
+                        modifier = Modifier.size(12.dp)
                     )
-                )
+                }
             }
-
         }
+    }
+}
 
-        /*Box(
+@Composable
+fun DeviceCardItem(
+    icon: ImageVector,
+    title: String,
+    subtitle: String,
+    badge: String,
+    badgeColor: Color,
+    onClick: () -> Unit
+) {
+    Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable { onClick() },
+        shape = RoundedCornerShape(24.dp),
+        colors = CardDefaults.cardColors(containerColor = Color(0xFF161B22))
+    ) {
+        Row(
             modifier = Modifier
-                .fillMaxWidth()
-                .align(Alignment.BottomCenter)
-                .background(
-                    Brush.verticalGradient(
-                        colors = listOf(
-                            Color.Transparent,
-                            Color(0xFF0E1116).copy(alpha = 0.9f),
-                            Color(0xFF0E1116)
-                        ), startY = 0f, endY = 100f
-                    )
-                )
-                .padding(bottom = dimensionResource(id = R.dimen.spacer_medium)),
-            contentAlignment = Alignment.Center
+                .padding(16.dp)
+                .fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically
         ) {
             Box(
                 modifier = Modifier
-                    .fillMaxWidth(if (isTablet) 0.35f else 0.55f)
-                    .widthIn(max = 320.dp)
-                    .height(dimensionResource(id = R.dimen.button_height))
-                    .clip(RoundedCornerShape(dimensionResource(id = R.dimen.radius_medium)))
-                    .background(primaryGradient)
-                    .clickable { navController.navigate("add_device") },
+                    .size(48.dp)
+                    .background(Color(0xFF1C222B), RoundedCornerShape(12.dp)),
                 contentAlignment = Alignment.Center
             ) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Icon(
-                        Icons.Outlined.AddCircleOutline,
-                        null,
-                        tint = Color.White,
-                        modifier = Modifier.size(dimensionResource(id = R.dimen.icon_size_standard))
-                    )
-                    Spacer(modifier = Modifier.width(dimensionResource(id = R.dimen.spacer_small)))
-                    Text(
-                        stringResource(id = R.string.add_device),
-                        color = Color.White,
-                        fontWeight = FontWeight.Bold,
-                        fontSize = with(density) { dimensionResource(id = R.dimen.text_body).toSp() })
+                Icon(
+                    imageVector = icon,
+                    contentDescription = null,
+                    tint = Color.White.copy(alpha = 0.6f),
+                    modifier = Modifier.size(24.dp)
+                )
+            }
+            Spacer(modifier = Modifier.width(16.dp))
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = title,
+                    color = Color.White,
+                    fontSize = 16.sp,
+                    fontWeight = FontWeight.Bold
+                )
+                Text(
+                    text = subtitle,
+                    color = Color(0xFF9CA3AF),
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.Bold
+                )
+            }
+            Surface(
+                color = badgeColor.copy(alpha = 0.1f),
+                shape = RoundedCornerShape(12.dp),
+                border = BorderStroke(1.dp, badgeColor.copy(alpha = 0.2f))
+            ) {
+                Text(
+                    text = badge,
+                    color = badgeColor,
+                    fontSize = 9.sp,
+                    fontWeight = FontWeight.Bold,
+                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp)
+                )
+            }
+        }
+    }
+}
+
+@Composable
+fun CameraRowItem(
+    name: String,
+    status: String,
+    isLive: Boolean,
+    onActivate: () -> Unit,
+    onDelete: () -> Unit
+) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(24.dp),
+        colors = CardDefaults.cardColors(containerColor = Color(0xFF161B22))
+    ) {
+        Row(
+            modifier = Modifier
+                .padding(16.dp)
+                .fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Box(
+                modifier = Modifier
+                    .size(48.dp)
+                    .background(Color(0xFF1C222B), RoundedCornerShape(12.dp)),
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(
+                    imageVector = Icons.Default.Videocam,
+                    contentDescription = null,
+                    tint = Color.White.copy(alpha = 0.6f),
+                    modifier = Modifier.size(24.dp)
+                )
+            }
+            Spacer(modifier = Modifier.width(16.dp))
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = name,
+                    color = Color.White,
+                    fontSize = 15.sp,
+                    fontWeight = FontWeight.Bold
+                )
+                Text(
+                    text = status.uppercase(),
+                    color = if (isLive) Color(0xFF4CAF50) else Color(0xFF9CA3AF),
+                    fontSize = 10.sp,
+                    fontWeight = FontWeight.Bold
+                )
+            }
+            if (isLive) {
+                Button(
+                    onClick = onActivate,
+                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF1B232D)),
+                    modifier = Modifier.height(32.dp),
+                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 0.dp),
+                    shape = RoundedCornerShape(8.dp)
+                ) {
+                    Text("Activate", color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.Bold)
                 }
             }
-        }*/
-
-        Box(
-            modifier = Modifier
-                .fillMaxWidth()
-                .align(Alignment.BottomCenter)
-                .background(
-                    Brush.verticalGradient(
-                        colors = listOf(
-                            Color.Transparent,
-                            Color(0xFF0E1116).copy(alpha = 0.9f),
-                            Color(0xFF0E1116)
-                        ), startY = 0f, endY = 100f
-                    )
+            Spacer(modifier = Modifier.width(12.dp))
+            IconButton(
+                onClick = onDelete,
+                modifier = Modifier.size(24.dp)
+            ) {
+                Icon(
+                    imageVector = Icons.Default.Delete,
+                    contentDescription = "Delete",
+                    tint = Color(0xFF9CA3AF).copy(alpha = 0.4f),
+                    modifier = Modifier.size(16.dp)
                 )
-                .padding(bottom = dimensionResource(id = R.dimen.spacer_medium)),
-            contentAlignment = Alignment.Center
+            }
+        }
+    }
+}
+
+@Composable
+fun MonitorRowItem(
+    name: String,
+    status: String,
+    subtext: String,
+    onDisconnect: () -> Unit,
+    onReconnect: (() -> Unit)? = null
+) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(24.dp),
+        colors = CardDefaults.cardColors(containerColor = Color(0xFF161B22))
+    ) {
+        Row(
+            modifier = Modifier
+                .padding(16.dp)
+                .fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically
         ) {
-            Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth(if (isTablet) 0.35f else 0.55f)
-                        .widthIn(max = 300.dp)
-                        .height(dimensionResource(id = R.dimen.button_height))
-                        .shadow(
-                            elevation = dimensionResource(id = R.dimen.elevation_large),
-                            shape = RoundedCornerShape(dimensionResource(id = R.dimen.radius_medium)),
-                            ambientColor = Color(0xFF77AEFF).copy(alpha = 0.5f),
-                            spotColor = Color(0xFF77AEFF).copy(alpha = 0.5f)
-                        )
-                        .clip(RoundedCornerShape(dimensionResource(id = R.dimen.radius_medium)))
-                        .background(primaryGradient)
-                        .clickable {
-                            navController.navigate("add_device")
-                        }, contentAlignment = Alignment.Center
-                ) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Icon(
-                            Icons.Default.Add,
-                            null,
-                            tint = Color.Black,
-                            modifier = Modifier.size(dimensionResource(id = R.dimen.icon_size_standard))
-                        )
-                        Spacer(modifier = Modifier.width(dimensionResource(id = R.dimen.spacer_small)))
-                        Text(
-                            stringResource(id = R.string.add_device),
-                            color = Color.Black,
-                            fontWeight = FontWeight.Bold,
-                            fontSize = with(density) { dimensionResource(id = R.dimen.text_body).toSp() })
-                    }
+            Box(
+                modifier = Modifier
+                    .size(48.dp)
+                    .background(Color(0xFF1C222B), RoundedCornerShape(12.dp)),
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(
+                    imageVector = Icons.Default.Laptop,
+                    contentDescription = null,
+                    tint = Color.White.copy(alpha = 0.6f),
+                    modifier = Modifier.size(24.dp)
+                )
+            }
+            Spacer(modifier = Modifier.width(16.dp))
+            Column(modifier = Modifier.weight(1f)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        text = name,
+                        color = Color.White,
+                        fontSize = 15.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(
+                        text = "• $status",
+                        color = Color(0xFF9CA3AF),
+                        fontSize = 10.sp,
+                        fontWeight = FontWeight.Bold
+                    )
                 }
+                Text(
+                    text = subtext,
+                    color = Color(0xFF9CA3AF),
+                    fontSize = 10.sp,
+                    fontWeight = FontWeight.Bold
+                )
+            }
+            
+            /*if (onReconnect != null && status != "SHARING") {
+                Button(
+                    onClick = onReconnect,
+                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF1B232D)),
+                    modifier = Modifier.height(32.dp),
+                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 0.dp),
+                    shape = RoundedCornerShape(8.dp)
+                ) {
+                    Text("Reconnect", color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                }
+                Spacer(modifier = Modifier.width(8.dp))
+            }*/
+
+            IconButton(onClick = onDisconnect) {
+                Icon(
+                    imageVector = Icons.AutoMirrored.Filled.Logout,
+                    contentDescription = "Disconnect",
+                    tint = Color(0xFF9CA3AF).copy(alpha = 0.4f),
+                    modifier = Modifier.size(20.dp)
+                )
+            }
+        }
+    }
+}
+
+@Composable
+fun IPCameraRowItem(
+    device: Device,
+    navController: NavController,
+    onDelete: () -> Unit
+) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(24.dp),
+        colors = CardDefaults.cardColors(containerColor = Color(0xFF161B22))
+    ) {
+        Row(
+            modifier = Modifier
+                .padding(16.dp)
+                .fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Box(
+                modifier = Modifier
+                    .size(48.dp)
+                    .background(Color(0xFF1C222B), RoundedCornerShape(12.dp)),
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(
+                    imageVector = Icons.Default.Router,
+                    contentDescription = null,
+                    tint = Color.White.copy(alpha = 0.6f),
+                    modifier = Modifier.size(24.dp)
+                )
+            }
+            Spacer(modifier = Modifier.width(16.dp))
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = device.name,
+                    color = Color.White,
+                    fontSize = 15.sp,
+                    fontWeight = FontWeight.Bold
+                )
+                Text(
+                    text = "${device.brand} • ${device.ip}",
+                    color = Color(0xFF9CA3AF),
+                    fontSize = 10.sp,
+                    fontWeight = FontWeight.Bold
+                )
+            }
+            Button(
+                onClick = {
+                    val encodedPath = device.path.replace("/", "|")
+                    navController.navigate("player/${Uri.encode(device.ip)}/${device.port}/${Uri.encode(device.username)}/${Uri.encode(device.password)}/${Uri.encode(encodedPath)}/${Uri.encode(device.name)}")
+                },
+                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF1B232D)),
+                modifier = Modifier.height(32.dp),
+                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 0.dp),
+                shape = RoundedCornerShape(8.dp)
+            ) {
+                Text("View", color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+            }
+            Spacer(modifier = Modifier.width(8.dp))
+            IconButton(onClick = onDelete) {
+                Icon(
+                    imageVector = Icons.Default.Delete,
+                    contentDescription = "Delete",
+                    tint = Color(0xFF9CA3AF).copy(alpha = 0.4f),
+                    modifier = Modifier.size(16.dp)
+                )
+            }
+        }
+    }
+}
+
+@Composable
+fun EmptyStateCard(icon: ImageVector, text: String, subtext: String) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(24.dp),
+        colors = CardDefaults.cardColors(containerColor = Color(0xFF161B22).copy(alpha = 0.5f))
+    ) {
+        Row(
+            modifier = Modifier
+                .padding(24.dp)
+                .fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Box(
+                modifier = Modifier
+                    .size(48.dp)
+                    .background(Color(0xFF1C222B), RoundedCornerShape(12.dp)),
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(
+                    imageVector = icon,
+                    contentDescription = null,
+                    tint = Color.White.copy(alpha = 0.2f),
+                    modifier = Modifier.size(24.dp)
+                )
+            }
+            Spacer(modifier = Modifier.width(16.dp))
+            Column {
+                Text(
+                    text = text,
+                    color = Color.White.copy(alpha = 0.4f),
+                    fontSize = 15.sp,
+                    fontWeight = FontWeight.Bold
+                )
+                Text(
+                    text = subtext,
+                    color = Color(0xFF9CA3AF).copy(alpha = 0.4f),
+                    fontSize = 10.sp,
+                    fontWeight = FontWeight.Bold
+                )
             }
         }
     }
@@ -4040,8 +4661,14 @@ fun getActivityIcon(type: String): ImageVector {
 
 fun getActivityIconColor(type: String): Color {
     return when (type) {
-        "camera_start", "monitor_connect", "live_start", "audio_unmute", "viewer_connect" -> Color(0xFF77AEFF)
-        "camera_stop", "monitor_disconnect", "connection_lost", "live_end", "audio_mute", "viewer_disconnect" -> Color(0xFFFF8A80)
+        "camera_start", "monitor_connect", "live_start", "audio_unmute", "viewer_connect" -> Color(
+            0xFF77AEFF
+        )
+
+        "camera_stop", "monitor_disconnect", "connection_lost", "live_end", "audio_mute", "viewer_disconnect" -> Color(
+            0xFFFF8A80
+        )
+
         "reconnecting" -> Color(0xFFFFD54F)
         "screenshot", "video_record" -> Color(0xFFBBC6E2)
         else -> Color.White
@@ -4257,9 +4884,17 @@ fun AddCameraDialog(
                         contentAlignment = Alignment.Center
                     ) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
-                            Icon(Icons.Default.Keyboard, contentDescription = null, tint = Color.Black)
+                            Icon(
+                                Icons.Default.Keyboard,
+                                contentDescription = null,
+                                tint = Color.Black
+                            )
                             Spacer(modifier = Modifier.width(12.dp))
-                            Text("Add the code manually", color = Color.Black, fontWeight = FontWeight.Bold)
+                            Text(
+                                "Add the code manually",
+                                color = Color.Black,
+                                fontWeight = FontWeight.Bold
+                            )
                         }
                     }
                 }
@@ -4331,7 +4966,10 @@ fun CameraScannerPreview(onScanSuccess: (String) -> Unit, onCameraReady: (Camera
 
                     val mediaImage = imageProxy.image
                     if (mediaImage != null) {
-                        val image = InputImage.fromMediaImage(mediaImage, imageProxy.imageInfo.rotationDegrees)
+                        val image = InputImage.fromMediaImage(
+                            mediaImage,
+                            imageProxy.imageInfo.rotationDegrees
+                        )
                         scanner.process(image)
                             .addOnSuccessListener { barcodes ->
                                 for (barcode in barcodes) {
@@ -4383,7 +5021,9 @@ fun ScannerFrameOverlay() {
     val cornerSize = 40.dp
     val radius = 12.dp
 
-    Canvas(modifier = Modifier.fillMaxSize().padding(24.dp)) {
+    Canvas(modifier = Modifier
+        .fillMaxSize()
+        .padding(24.dp)) {
         val strokeWidthPx = strokeWidth.toPx()
         val cornerSizePx = cornerSize.toPx()
         val radiusPx = radius.toPx()
@@ -4468,7 +5108,11 @@ fun ManualPairingDialog(
         title = { Text("Add the code manually", color = Color.White) },
         text = {
             Column {
-                Text("Enter the 9 or 10-digit code shown on the camera device.", color = Color(0xFF9CA3AF), fontSize = 14.sp)
+                Text(
+                    "Enter the 9 or 10-digit code shown on the camera device.",
+                    color = Color(0xFF9CA3AF),
+                    fontSize = 14.sp
+                )
                 Spacer(modifier = Modifier.height(16.dp))
                 OutlinedTextField(
                     value = pairingCode,
@@ -4510,7 +5154,23 @@ fun AllDevicesScreen(
     viewModel: CameraViewModel
 ) {
     val savedDevices by viewModel.savedDevices.observeAsState(emptyList())
+    val savedViewers by viewModel.savedViewers.observeAsState(emptyList())
     val onlineMonitors by viewModel.onlineMonitors.observeAsState(emptyMap())
+    val connectedViewers by viewModel.connectedViewers.observeAsState(emptyList())
+
+    val allRemoteDevices = remember(savedDevices, savedViewers) {
+        val list = mutableListOf<Triple<String, Long, String>>() // Name, Timestamp, Role (for UI)
+        val data = mutableListOf<Map<String, Any>>()
+
+        savedDevices.forEach {
+            data.add(mapOf("id" to it.deviceId, "name" to it.name, "time" to it.timestamp, "role" to it.role, "sid" to it.sessionId))
+        }
+        savedViewers.forEach {
+            data.add(mapOf("id" to it.deviceId, "name" to it.name, "time" to it.timestamp, "role" to "viewer", "sid" to it.sessionId))
+        }
+        
+        data.sortedByDescending { it["time"] as Long }
+    }
 
     Scaffold(
         topBar = {
@@ -4540,9 +5200,11 @@ fun AllDevicesScreen(
         },
         containerColor = Color(0xFF0E1116)
     ) { padding ->
-        if (savedDevices.isEmpty()) {
+        if (allRemoteDevices.isEmpty()) {
             Box(
-                modifier = Modifier.fillMaxSize().padding(padding),
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(padding),
                 contentAlignment = Alignment.Center
             ) {
                 Text(text = "No remote devices joined yet", color = Color.Gray)
@@ -4555,15 +5217,26 @@ fun AllDevicesScreen(
                     .padding(16.dp),
                 verticalArrangement = Arrangement.spacedBy(12.dp)
             ) {
-                items(savedDevices) { device ->
-                    val isLive = onlineMonitors[device.deviceId]?.sessionId == device.sessionId
+                items(allRemoteDevices) { deviceMap ->
+                    val dId = deviceMap["id"] as String
+                    val name = deviceMap["name"] as String
+                    val timestamp = deviceMap["time"] as Long
+                    val role = deviceMap["role"] as String
+                    val sid = deviceMap["sid"] as String
+
+                    val isLive = if (role == "viewer") {
+                        connectedViewers.any { it.deviceId == dId }
+                    } else {
+                        onlineMonitors[dId]?.sessionId == sid
+                    }
+
                     DeviceRowItem(
-                        name = device.name,
-                        timestamp = device.timestamp,
+                        name = name,
+                        timestamp = timestamp,
                         status = if (isLive) "ONLINE" else "OFFLINE",
                         onActivate = {
                             if (isLive) {
-                                onActivate(device.sessionId, device.role)
+                                onActivate(sid, role)
                             }
                         }
                     )
@@ -4574,7 +5247,11 @@ fun AllDevicesScreen(
 }
 
 @Composable
-fun BottomNavigationBar(selectedItem: Int, onItemSelected: (Int) -> Unit) {
+fun BottomNavigationBar(
+    selectedItem: Int,
+    viewModel: CameraViewModel,
+    onItemSelected: (Int) -> Unit
+) {
     val navBackground = Color(0xFF0E1116)
     val selectedContainerColor = Color(0xFF1B263B)
     val selectedContentColor = Color(0xFF77AEFF)
@@ -4635,12 +5312,33 @@ fun BottomNavigationBar(selectedItem: Int, onItemSelected: (Int) -> Unit) {
                         horizontalAlignment = Alignment.CenterHorizontally,
                         verticalArrangement = Arrangement.Center
                     ) {
-                        Icon(
-                            imageVector = icons[index],
-                            contentDescription = item,
-                            tint = contentColor,
-                            modifier = Modifier.size(iconSize)
-                        )
+                        Box {
+                            Icon(
+                                imageVector = icons[index],
+                                contentDescription = item,
+                                tint = contentColor,
+                                modifier = Modifier.size(iconSize)
+                            )
+                            /*if (index == 4 && unreadCount > 0) {
+                                Surface(
+                                    modifier = Modifier
+                                        .size(14.dp)
+                                        .align(Alignment.TopEnd)
+                                        .offset(x = 4.dp, y = (-4).dp),
+                                    shape = CircleShape,
+                                    color = Color.Red,
+                                    border = BorderStroke(1.dp, navBackground)
+                                ) {
+                                    Text(
+                                        text = if (unreadCount > 9) "9+" else unreadCount.toString(),
+                                        color = Color.White,
+                                        fontSize = 8.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        textAlign = TextAlign.Center
+                                    )
+                                }
+                            }*/
+                        }
                         Spacer(modifier = Modifier.height(if (isTablet) 4.dp else 2.dp))
                         Text(
                             text = item,

@@ -4,7 +4,9 @@ import android.content.Context
 import android.media.AudioManager
 import android.view.ViewGroup
 import android.widget.FrameLayout
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -20,12 +22,15 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.VolumeUp
 import androidx.compose.material.icons.filled.FiberManualRecord
 import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.PowerSettingsNew
 import androidx.compose.material.icons.filled.Screenshot
+import androidx.compose.material.icons.filled.SignalCellularAlt
 import androidx.compose.material.icons.filled.Stop
+import androidx.compose.material.icons.filled.Videocam
 import androidx.compose.material.icons.filled.VolumeOff
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Card
@@ -59,9 +64,13 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.dimensionResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.lifecycle.viewmodel.compose.viewModel
 import org.webrtc.SurfaceViewRenderer
+import java.text.SimpleDateFormat
+import java.util.Date
 import java.util.Locale
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -71,8 +80,8 @@ fun ViewerScreen(sessionId: String, onBack: () -> Unit, viewModel: CameraViewMod
     val density = LocalDensity.current
     val audioManager = remember { context.getSystemService(Context.AUDIO_SERVICE) as AudioManager }
 
-    val isConnected by viewModel.isConnected.observeAsState(false)
-    val sessionStatus by viewModel.sessionStatus.observeAsState()
+    val isConnected by viewModel.getSessionConnectionState(sessionId).observeAsState(false)
+    val sessionStatus by viewModel.getSessionStatus(sessionId).observeAsState()
     val savedDevices by viewModel.savedDevices.observeAsState(emptyList())
 
     val deviceName = remember(sessionId, savedDevices) {
@@ -93,11 +102,11 @@ fun ViewerScreen(sessionId: String, onBack: () -> Unit, viewModel: CameraViewMod
     // Session Status Observer
     LaunchedEffect(sessionStatus) {
         if (sessionStatus == "closed") {
-            viewModel.stopAll()
+            viewModel.stopViewing()
             onBack()
         } else if (sessionStatus == "declined") {
             showDeclineDialog = true
-            viewModel.stop()
+            viewModel.stopViewing()
         }
     }
 
@@ -141,20 +150,56 @@ fun ViewerScreen(sessionId: String, onBack: () -> Unit, viewModel: CameraViewMod
             .background(Color(0xFF0E1116))
     ) {
 
-        // WebRTC Remote Video Renderer - Always present to receive sink
-        AndroidView(
-            factory = { ctx ->
-                SurfaceViewRenderer(ctx).apply {
-                    layoutParams = FrameLayout.LayoutParams(
-                        ViewGroup.LayoutParams.MATCH_PARENT,
-                        ViewGroup.LayoutParams.MATCH_PARENT
-                    )
-                    viewModel.initRenderer(this, isLocal = false)
-                    remoteSink = this
+        // 1. WebRTC Remote Video Renderer (Full Screen)
+        Box(modifier = Modifier.fillMaxSize()) {
+            AndroidView(
+                factory = { ctx ->
+                    SurfaceViewRenderer(ctx).apply {
+                        layoutParams = FrameLayout.LayoutParams(
+                            ViewGroup.LayoutParams.MATCH_PARENT,
+                            ViewGroup.LayoutParams.MATCH_PARENT
+                        )
+                        viewModel.initRenderer(this, isLocal = false)
+                        remoteSink = this
+                    }
+                },
+                modifier = Modifier.fillMaxSize()
+            )
+
+            // Timer Overlay (matching CameraViewScreen)
+            var currentTime by remember { mutableStateOf("") }
+            LaunchedEffect(Unit) {
+                while (true) {
+                    currentTime = SimpleDateFormat("HH:mm:ss", Locale.getDefault()).format(Date())
+                    kotlinx.coroutines.delay(1000)
                 }
-            },
-            modifier = Modifier.fillMaxSize()
-        )
+            }
+
+            Surface(
+                modifier = Modifier
+                    .align(Alignment.BottomCenter)
+                    .padding(bottom = 120.dp),
+                color = Color.Black.copy(alpha = 0.5f),
+                shape = RoundedCornerShape(20.dp)
+            ) {
+                Row(
+                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Canvas(modifier = Modifier.size(6.dp)) {
+                        drawCircle(color = Color(0xFFFF8A80))
+                    }
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(
+                        text = currentTime,
+                        color = Color.White,
+                        fontSize = 14.sp,
+                        fontWeight = FontWeight.Bold,
+                        letterSpacing = 1.sp
+                    )
+                }
+            }
+        }
 
         if (!isConnected) {
             Box(
@@ -180,298 +225,240 @@ fun ViewerScreen(sessionId: String, onBack: () -> Unit, viewModel: CameraViewMod
             }
         }
 
-        // Overlay Controls
-        Column(modifier = Modifier.fillMaxSize()) {
-            // Top Bar
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .statusBarsPadding()
-                    .padding(dimensionResource(id = R.dimen.spacer_medium)),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.SpaceBetween
-            ) {
-                IconButton(
-                    onClick = {
-                        viewModel.stopAll()
-                        onBack()
-                    },
-                    modifier = Modifier.background(Color.Black.copy(alpha = 0.3f), CircleShape)
-                ) {
-                    Icon(
-                        Icons.Default.PowerSettingsNew,
-                        contentDescription = stringResource(id = R.string.close),
-                        tint = Color.White
+        // 2. Top Status Bar Overlay
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .statusBarsPadding()
+                .padding(16.dp),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            StatusCapsule(
+                icon = {
+                    Box(
+                        modifier = Modifier
+                            .size(6.dp)
+                            .background(if (isConnected) Color.Green else Color.Gray, CircleShape)
                     )
-                }
+                },
+                text = if (isConnected) "LIVE" else "WAITING"
+            )
 
-                // Connection Status Badge (matches updateConnectionBadge)
-                Surface(
-                    color = (if (isConnected) Color(0xFF2E7D32) else Color(0xFF616161)).copy(alpha = 0.9f),
-                    shape = RoundedCornerShape(dimensionResource(id = R.dimen.radius_large))
-                ) {
-                    Row(
-                        modifier = Modifier.padding(
-                            horizontal = dimensionResource(id = R.dimen.element_spacing),
-                            vertical = dimensionResource(id = R.dimen.spacer_small)
-                        ),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Box(
-                            modifier = Modifier
-                                .size(dimensionResource(id = R.dimen.spacer_small))
-                                .background(
-                                    if (isConnected) Color(0xFF76FF03) else Color(0xFFBDBDBD),
-                                    CircleShape
-                                )
-                        )
-                        Spacer(modifier = Modifier.width(dimensionResource(id = R.dimen.spacer_small)))
-                        Text(
-                            text = if (isConnected) stringResource(id = R.string.connected) else stringResource(
-                                id = R.string.waiting
-                            ),
-                            color = Color.White,
-                            fontSize = with(density) { dimensionResource(id = R.dimen.text_caption).toSp() },
-                            fontWeight = FontWeight.Bold
-                        )
-                    }
-                }
+            StatusCapsule(text = deviceName.uppercase())
 
-                Box(modifier = Modifier.size(dimensionResource(id = R.dimen.icon_size_standard)))
-            }
+            // Dummy stats matching image
+            StatusCapsule(
+                icon = {
+                    Icon(
+                        androidx.compose.material.icons.Icons.Default.SignalCellularAlt,
+                        null,
+                        tint = Color.White.copy(alpha = 0.6f),
+                        modifier = Modifier.size(12.dp)
+                    )
+                },
+                text = "98%"
+            )
+
+            StatusCapsule(
+                icon = {
+                    Icon(
+                        androidx.compose.material.icons.Icons.Default.Videocam,
+                        null,
+                        tint = Color.White.copy(alpha = 0.6f),
+                        modifier = Modifier.size(12.dp)
+                    )
+                },
+                text = "4.2 MB/S"
+            )
 
             Spacer(modifier = Modifier.weight(1f))
 
-            // Sound Slider Overlay (matches vertical_seek_bar_sound)
-            if (showSoundSeekBar) {
-                Box(
+            // Back button
+            IconButton(
+                onClick = {
+                    viewModel.stopViewing()
+                    onBack()
+                },
+                modifier = Modifier
+                    .size(40.dp)
+                    .background(Color.Black.copy(alpha = 0.3f), CircleShape)
+            ) {
+                Icon(
+                    androidx.compose.material.icons.Icons.AutoMirrored.Filled.ArrowBack,
+                    contentDescription = "Back",
+                    tint = Color.White,
+                    modifier = Modifier.size(24.dp)
+                )
+            }
+        }
+
+        // 3. Sound Slider Overlay (Vertical)
+        if (showSoundSeekBar) {
+            Box(
+                modifier = Modifier
+                    .align(Alignment.CenterEnd)
+                    .padding(end = 16.dp)
+            ) {
+                Card(
                     modifier = Modifier
-                        .align(Alignment.End)
-                        .padding(
-                            end = dimensionResource(id = R.dimen.screen_padding),
-                            bottom = dimensionResource(id = R.dimen.spacer_small)
-                        )
+                        .width(44.dp)
+                        .height(160.dp),
+                    colors = CardDefaults.cardColors(containerColor = Color.Black.copy(alpha = 0.8f)),
+                    shape = RoundedCornerShape(22.dp),
+                    border = androidx.compose.foundation.BorderStroke(1.dp, Color.White.copy(alpha = 0.1f))
                 ) {
-                    Card(
+                    Box(
                         modifier = Modifier
-                            .width(dimensionResource(id = R.dimen.option_icon_container))
-                            .height(dimensionResource(id = R.dimen.qr_code_size)),
-                        colors = CardDefaults.cardColors(containerColor = Color.Black.copy(alpha = 0.8f)),
-                        shape = RoundedCornerShape(dimensionResource(id = R.dimen.radius_large)),
-                        border = androidx.compose.foundation.BorderStroke(
-                            dimensionResource(id = R.dimen.spacer_tiny),
-                            Color.White.copy(alpha = 0.1f)
-                        )
+                            .fillMaxSize()
+                            .padding(vertical = 16.dp),
+                        contentAlignment = Alignment.Center
                     ) {
-                        Box(
+                        Slider(
+                            value = soundProgress,
+                            onValueChange = {
+                                soundProgress = it
+                                val streamType = AudioManager.STREAM_VOICE_CALL
+                                val maxVol = audioManager.getStreamMaxVolume(streamType)
+                                val index = (it * maxVol).toInt()
+                                audioManager.setStreamVolume(streamType, index, 0)
+                            },
                             modifier = Modifier
-                                .fillMaxSize()
-                                .padding(vertical = dimensionResource(id = R.dimen.screen_padding)),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Slider(
-                                value = soundProgress,
-                                onValueChange = {
-                                    soundProgress = it
-                                    val streamType = AudioManager.STREAM_VOICE_CALL
-                                    val maxVol = audioManager.getStreamMaxVolume(streamType)
-                                    val index = (it * maxVol).toInt()
-                                    audioManager.setStreamVolume(streamType, index, 0)
-                                },
-                                modifier = Modifier
-                                    .graphicsLayer {
-                                        rotationZ = -90f
-                                    }
-                                    .width(dimensionResource(id = R.dimen.slider_height_large)),
-                                colors = SliderDefaults.colors(
-                                    thumbColor = Color.White,
-                                    activeTrackColor = Color(0xFF77AEFF),
-                                    inactiveTrackColor = Color.White.copy(alpha = 0.2f)
-                                )
+                                .graphicsLayer {
+                                    rotationZ = -90f
+                                }
+                                .width(120.dp),
+                            colors = SliderDefaults.colors(
+                                thumbColor = Color.White,
+                                activeTrackColor = Color(0xFF77AEFF),
+                                inactiveTrackColor = Color.White.copy(alpha = 0.2f)
                             )
-                        }
+                        )
                     }
                 }
             }
+        }
 
-            /*// Bottom Controls
-            Surface(
-                modifier = Modifier.fillMaxWidth(),
-                color = Color(0xFF1B263B).copy(alpha = 0.95f),
-                shape = RoundedCornerShape(
-                    topStart = dimensionResource(id = R.dimen.section_spacing),
-                    topEnd = dimensionResource(id = R.dimen.section_spacing)
-                )
+        // 4. Bottom Control Bar (Pill shape matching image)
+        Surface(
+            modifier = Modifier
+                .align(Alignment.BottomCenter)
+                .padding(bottom = 32.dp)
+                .fillMaxWidth(0.9f)
+                .height(88.dp),
+            color = Color(0xFF161B22).copy(alpha = 0.9f),
+            shape = RoundedCornerShape(24.dp),
+            border = androidx.compose.foundation.BorderStroke(1.dp, Color.White.copy(alpha = 0.1f))
+        ) {
+            Row(
+                modifier = Modifier.fillMaxSize().padding(horizontal = 8.dp),
+                horizontalArrangement = Arrangement.SpaceEvenly,
+                verticalAlignment = Alignment.CenterVertically
             ) {
-                Column(
-                    modifier = Modifier.padding(dimensionResource(id = R.dimen.screen_padding)),
-                    horizontalAlignment = Alignment.CenterHorizontally
+                // Snapshot
+                IconButton(
+                    onClick = {
+                        val path = viewModel.takeScreenshot(context, isLocal = false)
+                        if (path != null) {
+                            android.widget.Toast.makeText(context, "Snapshot saved", android.widget.Toast.LENGTH_SHORT).show()
+                        }
+                    }
                 ) {
-                    Text(
-                        text = stringResource(id = R.string.monitoring_session, deviceName),
-                        color = Color.White.copy(alpha = 0.5f),
-                        fontSize = with(density) { dimensionResource(id = R.dimen.text_micro).toSp() },
-                        modifier = Modifier.padding(bottom = dimensionResource(id = R.dimen.screen_padding_small))
+                    Icon(
+                        androidx.compose.material.icons.Icons.Default.Screenshot,
+                        null,
+                        tint = Color.White.copy(alpha = 0.6f)
                     )
-
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceEvenly,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        // Sound Toggle (matches iv_sound)
-                        IconButton(
-                            onClick = {
-                                showSoundSeekBar = !showSoundSeekBar
-                                if (showSoundSeekBar) {
-                                    val streamType = AudioManager.STREAM_VOICE_CALL
-                                    val maxVol = audioManager.getStreamMaxVolume(streamType)
-                                    val curVol = audioManager.getStreamVolume(streamType)
-                                    soundProgress =
-                                        if (maxVol > 0) curVol.toFloat() / maxVol else 0f
-                                }
-                            },
-                            modifier = Modifier
-                                .size(dimensionResource(id = R.dimen.status_bar_height))
-                                .background(
-                                    if (showSoundSeekBar) Color(0xFF77AEFF).copy(alpha = 0.2f)
-                                    else Color.White.copy(alpha = 0.05f),
-                                    CircleShape
-                                )
-                        ) {
-                            Icon(
-                                imageVector = if (soundProgress > 0) Icons.AutoMirrored.Filled.VolumeUp else Icons.Default.VolumeOff,
-                                contentDescription = stringResource(id = R.string.sound),
-                                tint = Color.White,
-                                modifier = Modifier
-                                    .size(dimensionResource(id = R.dimen.icon_size_medium)) // Was 28dp, 40dp might be big but it's responsive
-                                    .graphicsLayer { alpha = if (soundProgress > 0) 1.0f else 0.5f }
-                            )
-                        }
-
-                        // Push-to-talk button
-                        Surface(
-                            modifier = Modifier
-                                .size(dimensionResource(id = R.dimen.bottom_nav_height)) // Was 84dp, 80dp is close
-                                .pointerInput(Unit) {
-                                    awaitPointerEventScope {
-                                        while (true) {
-                                            val event = awaitPointerEvent()
-                                            when (event.type) {
-                                                PointerEventType.Press -> {
-                                                    isTalking = true
-                                                    viewModel.setMicrophoneEnabled(true)
-                                                }
-
-                                                PointerEventType.Release -> {
-                                                    isTalking = false
-                                                    viewModel.setMicrophoneEnabled(false)
-                                                }
-                                            }
-                                        }
-                                    }
-                                },
-                            shape = CircleShape,
-                            color = if (isTalking) Color(0xFF77AEFF) else Color.White,
-                            shadowElevation = dimensionResource(id = R.dimen.elevation_large)
-                        ) {
-                            Box(contentAlignment = Alignment.Center) {
-                                Icon(
-                                    imageVector = Icons.Default.Mic,
-                                    contentDescription = stringResource(id = R.string.talk),
-                                    tint = if (isTalking) Color.White else Color(0xFF0E1116),
-                                    modifier = Modifier.size(dimensionResource(id = R.dimen.icon_size_medium)) // Was 36dp, 40dp is close
-                                )
-                            }
-                        }
-
-                        // Screenshot/Capture button
-                        IconButton(
-                            onClick = {
-                                val path = viewModel.takeScreenshot(context, isLocal = false)
-                                if (path != null) {
-                                    android.widget.Toast.makeText(
-                                        context,
-                                        "Screenshot saved: $path",
-                                        android.widget.Toast.LENGTH_SHORT
-                                    ).show()
-                                } else {
-                                    android.widget.Toast.makeText(
-                                        context,
-                                        "Failed to capture screenshot",
-                                        android.widget.Toast.LENGTH_SHORT
-                                    ).show()
-                                }
-                            },
-                            modifier = Modifier
-                                .size(dimensionResource(id = R.dimen.status_bar_height))
-                                .background(Color.White.copy(alpha = 0.05f), CircleShape)
-                        ) {
-                            Icon(
-                                imageVector = Icons.Default.Screenshot,
-                                contentDescription = stringResource(id = R.string.capture),
-                                tint = Color.White,
-                                modifier = Modifier.size(dimensionResource(id = R.dimen.icon_size_medium)) // Was 28dp, 40dp might be big
-                            )
-                        }
-                    }
-
-                    Spacer(modifier = Modifier.height(dimensionResource(id = R.dimen.spacer_small)))
                 }
-            }*/
 
-            // Bottom Controls
-            Surface(
-                modifier = Modifier.fillMaxWidth(),
-                color = Color.Black.copy(alpha = 0.5f),
-                shape = RoundedCornerShape(
-                    topStart = dimensionResource(id = R.dimen.radius_extra_large),
-                    topEnd = dimensionResource(id = R.dimen.radius_extra_large)
-                )
-            ) {
-
-                Column(
-                    modifier = Modifier.padding(dimensionResource(id = R.dimen.screen_padding)),
-                    horizontalAlignment = Alignment.CenterHorizontally
+                // Volume/Sound Toggle
+                IconButton(
+                    onClick = { showSoundSeekBar = !showSoundSeekBar }
                 ) {
+                    Icon(
+                        imageVector = if (soundProgress > 0) androidx.compose.material.icons.Icons.AutoMirrored.Filled.VolumeUp else androidx.compose.material.icons.Icons.Default.VolumeOff,
+                        contentDescription = "Sound",
+                        tint = if (showSoundSeekBar) Color(0xFF77AEFF) else Color.White.copy(alpha = 0.6f)
+                    )
+                }
 
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceEvenly,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-
-                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                            Surface(
-                                onClick = {
-                                    if (isRecording) {
-                                        val path = viewModel.stopRecording()
-                                        if (path != null) {
-                                            android.widget.Toast.makeText(
-                                                context,
-                                                "Video saved to: $path",
-                                                android.widget.Toast.LENGTH_LONG
-                                            ).show()
-                                        }
-                                    } else {
-                                        viewModel.startRecording(context, audioOnly = false)
-                                    }
-                                },
-                                modifier = Modifier.size(dimensionResource(id = R.dimen.bottom_nav_height)),
-                                shape = CircleShape,
-                                color = if (isRecording) Color.Red else Color.White
-                            ) {
-                                Box(contentAlignment = Alignment.Center) {
-                                    Icon(
-                                        imageVector = if (isRecording) Icons.Default.Stop else Icons.Default.FiberManualRecord,
-                                        contentDescription = "Record",
-                                        tint = if (isRecording) Color.White else Color.Red,
-                                        modifier = Modifier.size(dimensionResource(id = R.dimen.icon_size_medium))
-                                    )
-                                }
+                // Record Button (Center)
+                Surface(
+                    modifier = Modifier
+                        .size(64.dp)
+                        .clickable {
+                            if (isRecording) {
+                                viewModel.stopRecording()
+                            } else {
+                                viewModel.startRecording(context)
                             }
+                        },
+                    shape = CircleShape,
+                    color = if (isRecording) Color.Red.copy(alpha = 0.1f) else Color(0xFF242B33),
+                    border = androidx.compose.foundation.BorderStroke(2.dp, Color.White.copy(alpha = 0.2f))
+                ) {
+                    Box(contentAlignment = Alignment.Center) {
+                        Surface(
+                            modifier = Modifier.size(48.dp),
+                            shape = CircleShape,
+                            color = if (isRecording) Color.Red else Color.White
+                        ) {
+                            Icon(
+                                imageVector = if (isRecording) androidx.compose.material.icons.Icons.Default.Stop else androidx.compose.material.icons.Icons.Default.FiberManualRecord,
+                                contentDescription = "Record",
+                                tint = if (isRecording) Color.White else Color.Red,
+                                modifier = Modifier.padding(10.dp)
+                            )
                         }
                     }
+                }
+
+                // Push-to-Talk (Mic)
+                var isTalking by remember { mutableStateOf(false) }
+                Surface(
+                    modifier = Modifier
+                        .size(44.dp)
+                        .pointerInput(Unit) {
+                            awaitPointerEventScope {
+                                while (true) {
+                                    val event = awaitPointerEvent()
+                                    when (event.type) {
+                                        PointerEventType.Press -> {
+                                            isTalking = true
+                                            viewModel.setMicrophoneEnabled(true)
+                                        }
+                                        PointerEventType.Release -> {
+                                            isTalking = false
+                                            viewModel.setMicrophoneEnabled(false)
+                                        }
+                                    }
+                                }
+                            }
+                        },
+                    shape = CircleShape,
+                    color = if (isTalking) Color(0xFF77AEFF) else Color.Transparent
+                ) {
+                    Box(contentAlignment = Alignment.Center) {
+                        Icon(
+                            androidx.compose.material.icons.Icons.Default.Mic,
+                            null,
+                            tint = if (isTalking) Color.White else Color.White.copy(alpha = 0.6f)
+                        )
+                    }
+                }
+
+                // Stop/Exit
+                IconButton(
+                    onClick = {
+                        viewModel.stopViewing()
+                        onBack()
+                    }
+                ) {
+                    Icon(
+                        androidx.compose.material.icons.Icons.Default.Stop,
+                        null,
+                        tint = Color(0xFFFF8A80)
+                    )
                 }
             }
         }
@@ -494,7 +481,7 @@ fun ViewerScreen(sessionId: String, onBack: () -> Unit, viewModel: CameraViewMod
                 TextButton(
                     onClick = {
                         showDeclineDialog = false
-                        viewModel.stopAll()
+                        viewModel.stopViewing()
                         onBack()
                     }
                 ) {

@@ -1,6 +1,7 @@
 package monitoringcamera.transmitterconnect.officeconnectcamera
 
 import android.view.Surface
+import android.util.Log
 import org.webrtc.EglBase
 import org.webrtc.VideoTrack
 import java.io.File
@@ -57,7 +58,11 @@ class RecorderManager(private val webRTCManager: WebRTCManager) {
                 videoSink = vSink
 
                 val videoTrack = webRTCManager.getActiveVideoTrack()
-                videoTrack?.addSink(vSink)
+                try {
+                    videoTrack?.addSink(vSink)
+                } catch (e: Exception) {
+                    Log.e(TAG, "Failed to add sink to video track: ${e.message}")
+                }
             }
 
             val aEncoder = AudioEncoder(muxer, 44100, 1, 128_000)
@@ -79,7 +84,13 @@ class RecorderManager(private val webRTCManager: WebRTCManager) {
         isRecording = false
 
         webRTCManager.getActiveVideoTrack()?.let { track ->
-            videoSink?.let { sink -> track.removeSink(sink) }
+            videoSink?.let { sink ->
+                try {
+                    track.removeSink(sink)
+                } catch (e: Exception) {
+                    Log.e(TAG, "Failed to remove sink from video track: ${e.message}")
+                }
+            }
         }
 
         videoSink?.release()

@@ -12,6 +12,9 @@ interface PairedDeviceDao {
     @Query("SELECT * FROM paired_devices ORDER BY timestamp DESC")
     fun getAllPairedDevices(): Flow<List<PairedDevice>>
 
+    @Query("SELECT * FROM paired_devices WHERE deviceId = :deviceId LIMIT 1")
+    suspend fun getById(deviceId: String): PairedDevice?
+
     @Query("DELETE FROM paired_devices WHERE deviceId = :deviceId")
     suspend fun deleteById(deviceId: String)
 
