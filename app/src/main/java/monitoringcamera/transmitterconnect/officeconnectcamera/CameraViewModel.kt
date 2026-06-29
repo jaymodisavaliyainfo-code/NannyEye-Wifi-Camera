@@ -54,8 +54,8 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
     val hostId = MutableLiveData<String>("")
     val deviceName = MutableLiveData<String>("")
     val qrBitmap = MutableLiveData<Bitmap>()
-    val activePreviewSessionId = MutableLiveData<String?>(null)
-    val activePreviewDeviceName = MutableLiveData<String>("")
+    val activePreviewSessionIds = MutableLiveData<Set<String>>(emptySet())
+    val activePreviewDeviceNames = MutableLiveData<Map<String, String>>(emptyMap())
     val isConnected: LiveData<Boolean> = webRTCManager.connectionState
     private val _isBroadcasting = MutableLiveData(false)
     val isBroadcasting: LiveData<Boolean> = _isBroadcasting
@@ -572,7 +572,8 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                         ?: "unknown_$sessionId"
                     
                     // Update UI preview name
-                    activePreviewDeviceName.postValue(name)
+                    val currentNames = activePreviewDeviceNames.value ?: emptyMap()
+                    activePreviewDeviceNames.postValue(currentNames + (sessionId to name))
 
                     // Log the addition of the device
                     if (role == "camera") {
@@ -1035,7 +1036,10 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
 
     fun startViewing(sessionId: String, remoteSink: VideoSink? = null) {
         _sessionSeconds.postValue(0)
-        this.activePreviewSessionId.postValue(sessionId)
+        
+        val currentSessions = activePreviewSessionIds.value ?: emptySet()
+        activePreviewSessionIds.postValue(currentSessions + sessionId)
+        
         val dId = myDeviceId.value ?: ""
         val name = deviceName.value ?: "${Build.MANUFACTURER} ${Build.MODEL}"
 
@@ -1070,9 +1074,13 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     fun stopRemotePreview(sessionId: String? = null) {
-        val sid = sessionId ?: activePreviewSessionId.value
-        if (sid != null) {
-            webRTCManager.stopViewer(sid)
+        if (sessionId != null) {
+            webRTCManager.stopViewer(sessionId)
+            val currentSessions = activePreviewSessionIds.value ?: emptySet()
+            activePreviewSessionIds.postValue(currentSessions - sessionId)
+            
+            val currentNames = activePreviewDeviceNames.value ?: emptyMap()
+            activePreviewDeviceNames.postValue(currentNames - sessionId)
         }
     }
 
@@ -1090,10 +1098,11 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         val name = deviceName.value ?: "This device"
         logActivity("Viewing Stopped", "Disconnected from camera", "monitor_disconnect", "monitor")
 
-        activePreviewSessionId.value?.let { sid ->
+        activePreviewSessionIds.value?.forEach { sid ->
             webRTCManager.stopViewer(sid)
         }
-        activePreviewSessionId.postValue(null)
+        activePreviewSessionIds.postValue(emptySet())
+        activePreviewDeviceNames.postValue(emptyMap())
     }
 
     fun stopStreaming(sink: VideoSink? = null) {
@@ -1123,9 +1132,11 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
             }
         }
 
-        activePreviewSessionId.value?.let { sid ->
+        activePreviewSessionIds.value?.forEach { sid ->
             webRTCManager.stopViewer(sid)
         }
+        activePreviewSessionIds.postValue(emptySet())
+        activePreviewDeviceNames.postValue(emptyMap())
 
         _isBroadcasting.postValue(false)
     }

@@ -101,6 +101,7 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DatePicker
 import androidx.compose.material3.DatePickerDialog
 import androidx.compose.material3.DrawerValue
@@ -445,7 +446,6 @@ fun MainScreen(
     val drawerState = rememberDrawerState(initialValue = DrawerValue.Closed)
 
     var showQrDialog by remember { mutableStateOf(false) }
-    val qrBitmap by viewModel.qrBitmap.observeAsState()
     val isConnected by viewModel.getSessionConnectionState(viewModel.sessionId.observeAsState("").value).observeAsState(false)
     val reconnectRequest by viewModel.incomingReconnectRequest.observeAsState()
 
@@ -463,11 +463,15 @@ fun MainScreen(
             confirmButton = {
                 Button(onClick = {
                     val sId = request["sessionId"] ?: ""
+                    val hostName = request["hostName"] ?: "Remote Camera"
                     val requestId = request["requestId"] ?: ""
                     if (requestId.isNotEmpty()) {
                         viewModel.acceptFirestoreReconnectRequest(requestId)
                     }
-                    viewModel.activePreviewDeviceName.value = request["hostName"] ?: "Remote Camera"
+                    // Pre-populate the device name map for concurrent viewing
+                    val currentNames = viewModel.activePreviewDeviceNames.value ?: emptyMap()
+                    viewModel.activePreviewDeviceNames.value = currentNames + (sId to hostName)
+
                     viewModel.startViewing(sId)
                     coroutineScope.launch {
                         pagerState.animateScrollToPage(0)
@@ -808,14 +812,12 @@ fun DashboardContent(
     val sessionId by viewModel.sessionId.observeAsState("")
     val isConnected by viewModel.getSessionConnectionState(sessionId).observeAsState(false)
     val isBroadcasting by viewModel.isBroadcasting.observeAsState(false)
-    val activePreviewSessionId by viewModel.activePreviewSessionId.observeAsState(null)
-    val isRemoteConnected by viewModel.getSessionConnectionState(activePreviewSessionId ?: "")
-        .observeAsState(false)
+    val activePreviewSessions by viewModel.activePreviewSessionIds.observeAsState(emptySet())
+    val activePreviewDeviceNames by viewModel.activePreviewDeviceNames.observeAsState(emptyMap())
+    
     val qrBitmap by viewModel.qrBitmap.observeAsState()
     val cameraActivities by viewModel.cameraActivities.observeAsState(emptyList())
     val connectedViewers by viewModel.connectedViewers.observeAsState(emptyList())
-
-    val activePreviewDeviceName by viewModel.activePreviewDeviceName.observeAsState("")
 
     var showQrDialog by remember { mutableStateOf(false) }
     var showAddCameraDialog by remember { mutableStateOf(false) }
@@ -901,11 +903,8 @@ fun DashboardContent(
     }
 
     // Close QR scanner dialog automatically when remote camera connected
-    LaunchedEffect(isRemoteConnected) {
-        if (isRemoteConnected && showAddCameraDialog) {
-            showAddCameraDialog = false
-        }
-    }
+    // Removed LaunchedEffect(isRemoteConnected) because we now support multiple independent sessions.
+    // Dialog is closed directly when session is registered.
 
     LaunchedEffect(Unit) {
         val database = FirebaseDatabase.getInstance()
@@ -1097,7 +1096,7 @@ fun DashboardContent(
             Surface(
                 color = Color(0xFF161B22),
                 shape = RoundedCornerShape(8.dp),
-                modifier = Modifier.clickable { /* Monitor Wall */ }
+                modifier = Modifier.clickable { navController.navigate("monitor_wall") }
             ) {
                 Row(
                     modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
@@ -1143,15 +1142,15 @@ fun DashboardContent(
                     }
                 )
             }
-            activePreviewSessionId?.let { sid ->
+            activePreviewSessions.forEach { sid ->
+                val previewName = activePreviewDeviceNames[sid] ?: "Remote Camera"
                 item {
                     RemoteDeviceCard(
                         sessionId = sid,
-                        deviceName = activePreviewDeviceName,
+                        deviceName = previewName,
                         viewModel = viewModel,
                         onClose = {
-                            viewModel.activePreviewSessionId.value = null
-                            viewModel.stopRemotePreview()
+                            viewModel.stopRemotePreview(sid)
                         },
                         onClick = {
                             navController.navigate("viewer/${Uri.encode(sid)}")
@@ -1363,9 +1362,9 @@ fun DashboardContent(
                 showIPCameraSetupDialog = true
             },
             onScanSuccess = { sessionId: String ->
-                viewModel.activePreviewSessionId.value = sessionId
-                viewModel.activePreviewDeviceName.value = "Remote Camera"
+                showAddCameraDialog = false
                 viewModel.fetchAndSaveDeviceMetadata(sessionId)
+                viewModel.startViewing(sessionId)
             }
         )
     }
@@ -1375,10 +1374,8 @@ fun DashboardContent(
             onDismiss = { showManualPairingDialog = false },
             onConnect = { sessionId: String ->
                 showManualPairingDialog = false
-                // Set the session ID to show the preview card on dashboard
-                viewModel.activePreviewSessionId.value = sessionId
-                viewModel.activePreviewDeviceName.value = "Remote Camera"
                 viewModel.fetchAndSaveDeviceMetadata(sessionId)
+                viewModel.startViewing(sessionId)
             }
         )
     }
@@ -2982,6 +2979,7 @@ fun RecordsContent(
     var selectedMediaType by remember { mutableStateOf("ALL MEDIA") }
     var selectedCamera by remember { mutableStateOf("ALL CAMERAS") }
     var selectedTime by remember { mutableStateOf("ANY TIME") }
+    var showFilters by remember { mutableStateOf(false) }
 
     var showDatePicker by remember { mutableStateOf(false) }
     var showMediaTypeMenu by remember { mutableStateOf(false) }
@@ -3032,6 +3030,16 @@ fun RecordsContent(
             }
             matchesSearch && matchesCamera
         }
+    }
+
+    val todayDateStr = remember { SimpleDateFormat("yyyyMMdd", Locale.getDefault()).format(Date()) }
+    val dateSdf = remember { SimpleDateFormat("yyyyMMdd", Locale.getDefault()) }
+
+    val todayClipsCount = remember(filteredClips) {
+        filteredClips.count { dateSdf.format(Date(it.file.lastModified())) == todayDateStr }
+    }
+    val todaySnapshotsCount = remember(filteredSnapshots) {
+        filteredSnapshots.count { dateSdf.format(Date(it.file.lastModified())) == todayDateStr }
     }
 
     val storagePermission =
@@ -3132,7 +3140,9 @@ fun RecordsContent(
                     Icons.Default.Tune,
                     null,
                     tint = textGrey,
-                    modifier = Modifier.size(20.dp)
+                    modifier = Modifier
+                        .size(20.dp)
+                        .clickable { showFilters = !showFilters }
                 )
             },
             shape = RoundedCornerShape(16.dp),
@@ -3150,64 +3160,74 @@ fun RecordsContent(
         Spacer(modifier = Modifier.height(16.dp))
 
         // 3. Filters Row
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(12.dp)
-        ) {
-            FilterChipDropdown(
-                text = selectedMediaType,
-                onClick = { showMediaTypeMenu = true },
-                modifier = Modifier.weight(1f)
-            )
-            FilterChipDropdown(
-                text = selectedCamera,
-                onClick = { showCameraMenu = true },
-                modifier = Modifier.weight(1f)
-            )
-            FilterChipDropdown(
-                text = selectedTime,
-                onClick = { showDatePicker = true },
-                modifier = Modifier.weight(1f)
-            )
-        }
-
-        // Dropdowns Implementation
-        DropdownMenu(
-            expanded = showMediaTypeMenu,
-            onDismissRequest = { showMediaTypeMenu = false },
-            modifier = Modifier.background(cardBackground)
-        ) {
-            listOf("ALL MEDIA", "CLIPS", "SNAPSHOTS").forEach { type ->
-                DropdownMenuItem(
-                    text = { Text(type, color = Color.White, fontSize = 12.sp) },
-                    onClick = {
-                        selectedMediaType = type
-                        showMediaTypeMenu = false
+        if (showFilters) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                Box(modifier = Modifier.weight(1f)) {
+                    FilterChipDropdown(
+                        text = selectedMediaType,
+                        onClick = { showMediaTypeMenu = true },
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                    DropdownMenu(
+                        expanded = showMediaTypeMenu,
+                        onDismissRequest = { showMediaTypeMenu = false },
+                        modifier = Modifier.background(cardBackground)
+                    ) {
+                        listOf("ALL MEDIA", "CLIPS", "SNAPSHOTS").forEach { type ->
+                            DropdownMenuItem(
+                                text = { Text(type, color = Color.White, fontSize = 12.sp) },
+                                onClick = {
+                                    selectedMediaType = type
+                                    showMediaTypeMenu = false
+                                    showFilters = false
+                                }
+                            )
+                        }
                     }
-                )
-            }
-        }
-
-        DropdownMenu(
-            expanded = showCameraMenu,
-            onDismissRequest = { showCameraMenu = false },
-            modifier = Modifier.background(cardBackground)
-        ) {
-            DropdownMenuItem(
-                text = { Text("ALL CAMERAS", color = Color.White, fontSize = 12.sp) },
-                onClick = {
-                    selectedCamera = "ALL CAMERAS"
-                    showCameraMenu = false
                 }
-            )
-            listOf("RECORD", "MONITOR", "IP CAMERA").forEach { option ->
-                DropdownMenuItem(
-                    text = { Text(option, color = Color.White, fontSize = 12.sp) },
-                    onClick = {
-                        selectedCamera = option
-                        showCameraMenu = false
+
+                Box(modifier = Modifier.weight(1f)) {
+                    FilterChipDropdown(
+                        text = selectedCamera,
+                        onClick = { showCameraMenu = true },
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                    DropdownMenu(
+                        expanded = showCameraMenu,
+                        onDismissRequest = { showCameraMenu = false },
+                        modifier = Modifier.background(cardBackground)
+                    ) {
+                        DropdownMenuItem(
+                            text = { Text("ALL CAMERAS", color = Color.White, fontSize = 12.sp) },
+                            onClick = {
+                                selectedCamera = "ALL CAMERAS"
+                                showCameraMenu = false
+                                showFilters = false
+                            }
+                        )
+                        listOf("RECORD", "MONITOR", "IP CAMERA").forEach { option ->
+                            DropdownMenuItem(
+                                text = { Text(option, color = Color.White, fontSize = 12.sp) },
+                                onClick = {
+                                    selectedCamera = option
+                                    showCameraMenu = false
+                                    showFilters = false
+                                }
+                            )
+                        }
                     }
-                )
+                }
+
+                Box(modifier = Modifier.weight(1f)) {
+                    FilterChipDropdown(
+                        text = selectedTime,
+                        onClick = { showDatePicker = true },
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                }
             }
         }
 
@@ -3223,68 +3243,95 @@ fun RecordsContent(
                                 SimpleDateFormat("MMM dd", Locale.getDefault()).format(date)
                                     .uppercase()
                             viewModel.refreshVideoRecords(date)
+                            showFilters = false
                         }
                         showDatePicker = false
                     }) { Text("OK", color = Color(0xFF77AEFF)) }
+                },
+                dismissButton = {
+                    TextButton(onClick = {
+                        selectedTime = "ANY TIME"
+                        viewModel.refreshVideoRecords(null)
+                        showFilters = false
+                        showDatePicker = false
+                    }) { Text("Clear", color = Color.Red) }
                 }
             ) { DatePicker(state = datePickerState) }
         }
 
         Spacer(modifier = Modifier.height(32.dp))
 
-        // 4. Clips Section
-        if (selectedMediaType == "ALL MEDIA" || selectedMediaType == "CLIPS") {
-            SectionHeader(title = "Clips", countText = "${filteredClips.size} CAPTURED TODAY")
-            Spacer(modifier = Modifier.height(16.dp))
+        if (isLoadingVideos) {
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(200.dp),
+                contentAlignment = Alignment.Center
+            ) {
+                CircularProgressIndicator(color = Color(0xFF77AEFF))
+            }
+        } else {
+            // 4. Clips Section
+            if (selectedMediaType == "ALL MEDIA" || selectedMediaType == "CLIPS") {
+                SectionHeader(title = "Clips", countText = "$todayClipsCount CAPTURED TODAY")
+                Spacer(modifier = Modifier.height(16.dp))
 
-            if (filteredClips.isEmpty()) {
-                EmptySectionPlaceholder("No clips found")
-            } else {
-                LazyRow(
-                    horizontalArrangement = Arrangement.spacedBy(16.dp),
-                    contentPadding = PaddingValues(bottom = 16.dp)
-                ) {
-                    items(filteredClips) { clip ->
-                        ClipThumbnail(clip) {
-                            playMedia(context, clip.file, "video/*")
+                if (filteredClips.isEmpty()) {
+                    EmptySectionPlaceholder("No clips found")
+                } else {
+                    val previewClips = filteredClips.take(5)
+                    LazyRow(
+                        horizontalArrangement = Arrangement.spacedBy(16.dp),
+                        contentPadding = PaddingValues(bottom = 16.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        items(previewClips) { clip ->
+                            ClipThumbnail(clip) {
+                                playMedia(context, clip.file, "video/*")
+                            }
+                        }
+                        if (filteredClips.size > 5) {
+                            item {
+                                ViewAllCard(Modifier.size(140.dp)) {
+                                    navController.navigate("all_devices_records")
+                                }
+                            }
                         }
                     }
                 }
             }
-        }
 
-        Spacer(modifier = Modifier.height(24.dp))
+            Spacer(modifier = Modifier.height(24.dp))
 
-        // 5. Snapshots Section
-        if (selectedMediaType == "ALL MEDIA" || selectedMediaType == "SNAPSHOTS") {
-            SectionHeader(
-                title = "Snapshots",
-                countText = "${filteredSnapshots.size} CAPTURED TODAY"
-            )
-            Spacer(modifier = Modifier.height(16.dp))
+            // 5. Snapshots Section
+            if (selectedMediaType == "ALL MEDIA" || selectedMediaType == "SNAPSHOTS") {
+                SectionHeader(
+                    title = "Snapshots",
+                    countText = "$todaySnapshotsCount CAPTURED TODAY"
+                )
+                Spacer(modifier = Modifier.height(16.dp))
 
-            if (filteredSnapshots.isEmpty()) {
-                EmptySectionPlaceholder("No snapshots found")
-            } else {
-                BoxWithConstraints(modifier = Modifier.fillMaxWidth()) {
-                    val columns = 3
-                    val spacing = 16.dp
-                    val itemWidth = (maxWidth - (spacing * (columns - 1))) / columns
-
-                    Column(verticalArrangement = Arrangement.spacedBy(spacing)) {
-                        filteredSnapshots.chunked(columns).forEach { rowItems ->
-                            Row(horizontalArrangement = Arrangement.spacedBy(spacing)) {
-                                rowItems.forEach { snapshot ->
-                                    SnapshotThumbnail(
-                                        record = snapshot,
-                                        modifier = Modifier.size(itemWidth)
-                                    ) {
-                                        playMedia(context, snapshot.file, "image/*")
-                                    }
-                                }
-                                // Fill empty spaces if row is not full
-                                repeat(columns - rowItems.size) {
-                                    Spacer(modifier = Modifier.size(itemWidth))
+                if (filteredSnapshots.isEmpty()) {
+                    EmptySectionPlaceholder("No snapshots found")
+                } else {
+                    val previewSnapshots = filteredSnapshots.take(5)
+                    LazyRow(
+                        horizontalArrangement = Arrangement.spacedBy(16.dp),
+                        contentPadding = PaddingValues(bottom = 16.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        items(previewSnapshots) { snapshot ->
+                            SnapshotThumbnail(
+                                record = snapshot,
+                                modifier = Modifier.size(110.dp)
+                            ) {
+                                playMedia(context, snapshot.file, "image/*")
+                            }
+                        }
+                        if (filteredSnapshots.size > 5) {
+                            item {
+                                ViewAllCard(Modifier.size(110.dp)) {
+                                    navController.navigate("all_devices_records")
                                 }
                             }
                         }
@@ -3420,6 +3467,44 @@ fun SnapshotThumbnail(
 }
 
 @Composable
+fun ViewAllCard(modifier: Modifier = Modifier, onClick: () -> Unit) {
+    Card(
+        modifier = modifier
+            .clickable { onClick() },
+        shape = RoundedCornerShape(20.dp),
+        colors = CardDefaults.cardColors(containerColor = Color(0xFF161B22)),
+        border = BorderStroke(1.dp, Color.White.copy(alpha = 0.05f))
+    ) {
+        Column(
+            modifier = Modifier.fillMaxSize(),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.Center
+        ) {
+            Surface(
+                modifier = Modifier.size(36.dp),
+                shape = CircleShape,
+                color = Color(0xFF1B232D)
+            ) {
+                Icon(
+                    Icons.AutoMirrored.Filled.ArrowForward,
+                    contentDescription = null,
+                    tint = Color(0xFF77AEFF),
+                    modifier = Modifier.padding(10.dp)
+                )
+            }
+            Spacer(modifier = Modifier.height(12.dp))
+            Text(
+                text = "VIEW ALL",
+                color = Color(0xFF77AEFF),
+                fontSize = 10.sp,
+                fontWeight = FontWeight.Bold,
+                letterSpacing = 1.sp
+            )
+        }
+    }
+}
+
+@Composable
 fun EmptySectionPlaceholder(text: String) {
     Box(
         modifier = Modifier
@@ -3431,7 +3516,7 @@ fun EmptySectionPlaceholder(text: String) {
     }
 }
 
-private fun playMedia(context: Context, file: File, mimeType: String) {
+internal fun playMedia(context: Context, file: File, mimeType: String) {
     try {
         val uri = androidx.core.content.FileProvider.getUriForFile(
             context,
@@ -3946,8 +4031,7 @@ fun MonitorRowItem(
     name: String,
     status: String,
     subtext: String,
-    onDisconnect: () -> Unit,
-    onReconnect: (() -> Unit)? = null
+    onDisconnect: () -> Unit
 ) {
     Card(
         modifier = Modifier.fillMaxWidth(),
@@ -4070,8 +4154,13 @@ fun IPCameraRowItem(
             }
             Button(
                 onClick = {
-                    val encodedPath = device.path.replace("/", "|")
-                    navController.navigate("player/${Uri.encode(device.ip)}/${device.port}/${Uri.encode(device.username)}/${Uri.encode(device.password)}/${Uri.encode(encodedPath)}/${Uri.encode(device.name)}")
+                    val channelCount = device.channelCount
+                    if (channelCount <= 1) {
+                        val encodedPath = device.path.replace("/", "|")
+                        navController.navigate("player/${Uri.encode(device.ip)}/${device.port}/${Uri.encode(device.username)}/${Uri.encode(device.password)}/${Uri.encode(encodedPath)}/${Uri.encode(device.name)}")
+                    } else {
+                        navController.navigate("multi_channel/${Uri.encode(device.ip)}/${device.port}/${Uri.encode(device.username)}/${Uri.encode(device.password)}/$channelCount/${device.mainStream}/${device.brand}")
+                    }
                 },
                 colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF1B232D)),
                 modifier = Modifier.height(32.dp),

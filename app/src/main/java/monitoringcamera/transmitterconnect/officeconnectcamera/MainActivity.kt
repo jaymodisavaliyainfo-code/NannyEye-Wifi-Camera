@@ -181,7 +181,12 @@ fun AppNavigation() {
 
     val startDestination = remember {
         if (skipSplash) {
-            if (authViewModel.isUserLoggedIn()) "main" else "login"
+            val introFinished = prefs.getBoolean("intro_finished", false)
+            if (!introFinished) {
+                "intro"
+            } else {
+                if (authViewModel.isUserLoggedIn()) "main" else "login"
+            }
         } else {
             "splash"
         }
@@ -192,7 +197,12 @@ fun AppNavigation() {
     ) {
         detailScreen("splash") { _ ->
             SplashScreen(onTimeout = {
-                val nextDest = if (authViewModel.isUserLoggedIn()) "main" else "login"
+                val introFinished = prefs.getBoolean("intro_finished", false)
+                val nextDest = if (!introFinished) {
+                    "intro"
+                } else {
+                    if (authViewModel.isUserLoggedIn()) "main" else "login"
+                }
 
                 navController.navigate(nextDest) {
                     popUpTo("splash") { inclusive = true }
@@ -203,7 +213,8 @@ fun AppNavigation() {
             IntroPagerScreen(
                 onFinish = {
                     prefs.edit().putBoolean("intro_finished", true).apply()
-                    navController.navigate("login") {
+                    val nextDest = if (authViewModel.isUserLoggedIn()) "main" else "login"
+                    navController.navigate(nextDest) {
                         popUpTo("intro") { inclusive = true }
                     }
                 })
@@ -445,6 +456,9 @@ fun AppNavigation() {
         }
         detailScreen("preferences") { _ ->
             PreferencesScreen(navController = navController)
+        }
+        detailScreen("monitor_wall") { _ ->
+            MonitorWallScreen(navController = navController)
         }
     }
 }

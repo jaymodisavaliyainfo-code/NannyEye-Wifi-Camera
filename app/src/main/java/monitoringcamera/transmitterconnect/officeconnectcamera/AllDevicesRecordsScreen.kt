@@ -47,13 +47,14 @@ fun AllDevicesRecordsScreen(
 ) {
     val context = LocalContext.current
     val density = LocalDensity.current
-    val tabs = listOf("Record Videos", "Monitor Videos", "Ip Camera Videos")
+    val tabs = listOf("Record Videos", "Monitor Videos", "Ip Camera Videos", "Snapshots")
     val pagerState = rememberPagerState(pageCount = { tabs.size })
     val scope = rememberCoroutineScope()
     
     val recordVideos by viewModel.recordVideos.observeAsState(emptyList())
     val monitorVideos by viewModel.monitorVideos.observeAsState(emptyList())
     val ipCameraVideos by viewModel.ipCameraVideos.observeAsState(emptyList())
+    val snapshots by viewModel.snapshots.observeAsState(emptyList())
     val isLoading by viewModel.isLoadingVideos.observeAsState(false)
 
     LaunchedEffect(Unit) {
@@ -126,20 +127,46 @@ fun AllDevicesRecordsScreen(
                     val currentList = when (page) {
                         0 -> recordVideos
                         1 -> monitorVideos
-                        else -> ipCameraVideos
+                        2 -> ipCameraVideos
+                        else -> snapshots
                     }
 
                     if (currentList.isEmpty()) {
                         EmptyState(textGrey, cardBackground, density)
                     } else {
-                        LazyColumn(
-                            modifier = Modifier.fillMaxSize(),
-                            contentPadding = PaddingValues(dimensionResource(id = R.dimen.spacer_medium))
-                        ) {
-                            items(currentList) { record ->
-                                VideoRecordItem(record, context, cardBackground, textGrey, density) {
-                                    fileToDelete = record.file
-                                    showDeleteSheet = true
+                        if (page == 3) {
+                            // Snapshots Grid View
+                            val columns = 3
+                            LazyColumn(
+                                modifier = Modifier.fillMaxSize(),
+                                contentPadding = PaddingValues(16.dp),
+                                verticalArrangement = Arrangement.spacedBy(16.dp)
+                            ) {
+                                items(currentList.chunked(columns)) { rowItems ->
+                                    Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+                                        rowItems.forEach { record ->
+                                            Box(modifier = Modifier.weight(1f)) {
+                                                SnapshotThumbnail(record, Modifier.aspectRatio(1f)) {
+                                                    playMedia(context, record.file, "image/*")
+                                                }
+                                            }
+                                        }
+                                        repeat(columns - rowItems.size) {
+                                            Spacer(modifier = Modifier.weight(1f))
+                                        }
+                                    }
+                                }
+                            }
+                        } else {
+                            LazyColumn(
+                                modifier = Modifier.fillMaxSize(),
+                                contentPadding = PaddingValues(dimensionResource(id = R.dimen.spacer_medium))
+                            ) {
+                                items(currentList) { record ->
+                                    VideoRecordItem(record, context, cardBackground, textGrey, density) {
+                                        fileToDelete = record.file
+                                        showDeleteSheet = true
+                                    }
                                 }
                             }
                         }

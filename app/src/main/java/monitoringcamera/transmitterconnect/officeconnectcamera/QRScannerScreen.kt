@@ -124,6 +124,10 @@ fun QRScannerScreen(onBack: () -> Unit, onScanSuccess: (String) -> Unit, viewMod
                                                         ref.onDisconnect().removeValue()
                                                     }
 
+                                                    // Register session in ViewModel to support concurrent viewing
+                                                    viewModel.fetchAndSaveDeviceMetadata(scannedSessionId)
+                                                    viewModel.startViewing(scannedSessionId)
+
                                                     onScanSuccess(scannedSessionId)
                                                 } catch (e: Exception) {
                                                     // Fallback if not JSON

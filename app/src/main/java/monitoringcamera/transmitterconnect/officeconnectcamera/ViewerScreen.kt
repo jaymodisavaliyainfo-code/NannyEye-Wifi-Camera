@@ -277,7 +277,7 @@ fun ViewerScreen(sessionId: String, onBack: () -> Unit, viewModel: CameraViewMod
             // Back button
             IconButton(
                 onClick = {
-                    viewModel.stopViewing()
+                    // Navigate back without stopping the session to allow concurrent viewing
                     onBack()
                 },
                 modifier = Modifier
@@ -450,7 +450,7 @@ fun ViewerScreen(sessionId: String, onBack: () -> Unit, viewModel: CameraViewMod
                 // Stop/Exit
                 IconButton(
                     onClick = {
-                        viewModel.stopViewing()
+                        viewModel.stopRemotePreview(sessionId)
                         onBack()
                     }
                 ) {
