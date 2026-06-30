@@ -56,6 +56,15 @@ class WebRTCManager(private val context: Context) {
     private var lastRecordedFile: File? = null
 
     private var localRenderer: SurfaceViewRenderer? = null
+
+    // Motion Detection
+    private val _motionDetected = MutableLiveData(false)
+    val motionDetected: LiveData<Boolean> get() = _motionDetected
+    private val _personDetected = MutableLiveData(false)
+    val personDetected: LiveData<Boolean> get() = _personDetected
+    var motionPercentage: Float = 0f
+    var localMotionSink: MotionDetectionSink? = null
+    private val remoteMotionSinks = mutableListOf<MotionDetectionSink>()
     
     val isBroadcaster: Boolean get() = hostSessions.isNotEmpty()
 
@@ -516,6 +525,9 @@ class WebRTCManager(private val context: Context) {
                         val session = viewerSessions[sessionId]
                         session?.remoteVideoTrack = track
                         session?.remoteVideoSink?.let { track.addSink(it) }
+                        remoteMotionSinks.forEach { motionSink ->
+                            try { track.addSink(motionSink) } catch (e: Exception) {}
+                        }
                     }
                 }
 
@@ -525,6 +537,9 @@ class WebRTCManager(private val context: Context) {
                         val session = viewerSessions[sessionId]
                         session?.remoteVideoTrack = track
                         session?.remoteVideoSink?.let { track.addSink(it) }
+                        remoteMotionSinks.forEach { motionSink ->
+                            try { track.addSink(motionSink) } catch (e: Exception) {}
+                        }
                     }
                 }
 
@@ -756,8 +771,24 @@ class WebRTCManager(private val context: Context) {
 
     fun switchCamera() {
         videoCapturer?.switchCamera(object : CameraVideoCapturer.CameraSwitchHandler {
-            override fun onCameraSwitchDone(isFront: Boolean) { this@WebRTCManager.isFrontFacing = isFront; _isFrontFacing.postValue(isFront); localRenderer?.setMirror(isFront) }
-            override fun onCameraSwitchError(error: String?) {}
+            override fun onCameraSwitchDone(isFront: Boolean) {
+                this@WebRTCManager.isFrontFacing = isFront
+                _isFrontFacing.postValue(isFront)
+                localRenderer?.setMirror(isFront)
+                localMotionSink?.resetDetector()
+                setMotionDetected(false, 0f)
+                setPersonDetected(false)
+                Log.d(TAG, "Camera switched to ${if (isFront) "front" else "back"}")
+            }
+            override fun onCameraSwitchError(error: String?) {
+                Log.e(TAG, "Camera switch error: $error — attempting recovery")
+                try {
+                    videoCapturer?.stopCapture()
+                    videoCapturer?.startCapture(1280, 720, 30)
+                } catch (e: Exception) {
+                    Log.e(TAG, "Camera restart failed: ${e.message}")
+                }
+            }
         })
     }
 
@@ -790,6 +821,62 @@ class WebRTCManager(private val context: Context) {
                 Log.e(TAG, "Error removing local sink: ${e.message}")
             }
         }
+    }
+
+    fun addLocalMotionSink(sink: MotionDetectionSink) {
+        localMotionSink = sink
+        synchronized(mediaLock) {
+            try {
+                localVideoTrack?.addSink(sink)
+            } catch (e: Exception) {
+                Log.e(TAG, "Error adding local motion sink: ${e.message}")
+            }
+        }
+    }
+
+    fun removeLocalMotionSink() {
+        localMotionSink?.let { sink ->
+            synchronized(mediaLock) {
+                try {
+                    localVideoTrack?.removeSink(sink)
+                } catch (e: Exception) {
+                    Log.e(TAG, "Error removing local motion sink: ${e.message}")
+                }
+            }
+            sink.release()
+            localMotionSink = null
+        }
+    }
+
+    fun addRemoteMotionSink(sessionId: String, sink: MotionDetectionSink) {
+        remoteMotionSinks.add(sink)
+        val track = viewerSessions[sessionId]?.remoteVideoTrack
+        if (track != null) {
+            track.addSink(sink)
+        }
+    }
+
+    fun removeAllRemoteMotionSinks() {
+        remoteMotionSinks.forEach { sink ->
+            viewerSessions.values.forEach { session ->
+                try {
+                    session.remoteVideoTrack?.removeSink(sink)
+                } catch (e: Exception) {
+                    Log.e(TAG, "Error removing remote motion sink: ${e.message}")
+                }
+            }
+            sink.release()
+        }
+        remoteMotionSinks.clear()
+    }
+
+    fun setMotionDetected(detected: Boolean, percentage: Float = 0f) {
+        motionPercentage = percentage
+        _motionDetected.postValue(detected)
+    }
+
+    fun setPersonDetected(detected: Boolean) {
+        _personDetected.postValue(detected)
     }
 
     fun addRemoteSink(sessionId: String, sink: VideoSink) {
@@ -874,6 +961,8 @@ class WebRTCManager(private val context: Context) {
                 surfaceTextureHelper?.dispose()
             } catch (e: Exception) {
             }
+            localMotionSink?.release(); localMotionSink = null
+            remoteMotionSinks.forEach { it.release() }; remoteMotionSinks.clear()
             localVideoTrack = null; localAudioTrack = null; localMediaStream = null; videoSource = null; audioSource = null; videoCapturer = null; surfaceTextureHelper = null
             _connectionState.postValue(false)
         }

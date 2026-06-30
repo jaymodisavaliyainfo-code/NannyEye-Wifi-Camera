@@ -24,6 +24,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.CameraAlt
 import androidx.compose.material.icons.filled.FiberManualRecord
+import androidx.compose.material.icons.automirrored.filled.DirectionsRun
 import androidx.compose.material.icons.filled.FlipCameraAndroid
 import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.MicOff
@@ -100,6 +101,8 @@ fun CameraViewScreen(
     val connectedViewers by viewModel.connectedViewers.observeAsState(emptyList())
     val isBroadcasting by viewModel.isBroadcasting.observeAsState(false)
     val deviceName by viewModel.deviceName.observeAsState("SENTINEL-X1")
+    val motionDetected by viewModel.motionDetected.observeAsState(false)
+    val personDetected by viewModel.personDetected.observeAsState(false)
 
     var showDeclineDialog by remember { mutableStateOf(false) }
     var hadViewers by remember { mutableStateOf(false) }
@@ -304,6 +307,20 @@ fun CameraViewScreen(
                 },
                 text = "4.2 MB/S"
             )
+
+            if (motionDetected) {
+                StatusCapsule(
+                    icon = {
+                        Icon(
+                            imageVector = Icons.AutoMirrored.Filled.DirectionsRun,
+                            contentDescription = null,
+                            tint = if (personDetected) Color.Red else Color.Yellow,
+                            modifier = Modifier.size(12.dp)
+                        )
+                    },
+                    text = if (personDetected) "PERSON" else "MOTION"
+                )
+            }
 
             Spacer(modifier = Modifier.weight(1f))
             

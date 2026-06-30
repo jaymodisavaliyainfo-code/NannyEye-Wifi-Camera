@@ -120,6 +120,7 @@ fun MonitorWallScreen(
                     )
                 }
                 count == 2 -> {
+                    // Two tiles stacked vertically — each full width
                     activeItems.forEach { item ->
                         MonitorWallTile(
                             item = item,
@@ -130,24 +131,34 @@ fun MonitorWallScreen(
                     }
                 }
                 else -> {
-                    for (r in 0 until 2) {
+                    // 3+ sessions: Pairs side by side per row; if odd, the last tile spans full width
+                    val rows = activeItems.chunked(2)
+                    rows.forEach { rowItems ->
                         Row(
                             modifier = Modifier.weight(1f).fillMaxWidth(),
                             horizontalArrangement = Arrangement.spacedBy(8.dp)
                         ) {
-                            for (c in 0 until 2) {
-                                val idx = r * 2 + c
-                                if (idx < activeItems.size) {
-                                    val item = activeItems[idx]
-                                    MonitorWallTile(
-                                        item = item,
-                                        cameraViewModel = cameraViewModel,
-                                        navController = navController,
-                                        modifier = Modifier.weight(1f).fillMaxHeight()
-                                    )
-                                } else {
-                                    Spacer(modifier = Modifier.weight(1f))
-                                }
+                            if (rowItems.size == 2) {
+                                MonitorWallTile(
+                                    item = rowItems[0],
+                                    cameraViewModel = cameraViewModel,
+                                    navController = navController,
+                                    modifier = Modifier.weight(1f).fillMaxHeight()
+                                )
+                                MonitorWallTile(
+                                    item = rowItems[1],
+                                    cameraViewModel = cameraViewModel,
+                                    navController = navController,
+                                    modifier = Modifier.weight(1f).fillMaxHeight()
+                                )
+                            } else {
+                                // Last tile spans full width
+                                MonitorWallTile(
+                                    item = rowItems[0],
+                                    cameraViewModel = cameraViewModel,
+                                    navController = navController,
+                                    modifier = Modifier.fillMaxSize()
+                                )
                             }
                         }
                     }
@@ -167,6 +178,9 @@ fun MonitorWallTile(
     val sessionId = item.sessionId
     val isLocal = item is ActiveMonitorItem.ThisDevice
     val isConnected by cameraViewModel.getSessionConnectionState(sessionId).observeAsState(false)
+    val motionDetected by cameraViewModel.motionDetected.observeAsState(false)
+    val personDetected by cameraViewModel.personDetected.observeAsState(false)
+    val showMotion = motionDetected || personDetected
     
     var renderer by remember { mutableStateOf<SurfaceViewRenderer?>(null) }
 
@@ -262,7 +276,7 @@ fun MonitorWallTile(
                     }
                 }
 
-                if (isConnected) {
+                if (isConnected && showMotion) {
                     Surface(
                         modifier = Modifier.align(Alignment.TopEnd),
                         color = Color.Black.copy(alpha = 0.5f),
@@ -270,8 +284,8 @@ fun MonitorWallTile(
                     ) {
                         Icon(
                             Icons.AutoMirrored.Filled.DirectionsRun,
-                            contentDescription = "Motion",
-                            tint = Color.Yellow.copy(alpha = 0.8f),
+                            contentDescription = if (personDetected) "Person Detected" else "Motion",
+                            tint = if (personDetected) Color.Red else Color.Yellow.copy(alpha = 0.8f),
                             modifier = Modifier.padding(4.dp).size(16.dp)
                         )
                     }

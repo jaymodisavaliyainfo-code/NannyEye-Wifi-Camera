@@ -9,6 +9,7 @@ plugins {
 android {
     namespace = "monitoringcamera.transmitterconnect.officeconnectcamera"
     compileSdk = 35
+    ndkVersion = "27.0.12077973"
 
     defaultConfig {
         applicationId = "monitoringcamera.transmitterconnect.officeconnectcamera"
@@ -61,7 +62,19 @@ android {
             version = "4.1.0"
         }
     }
+
+    packaging {
+        jniLibs {
+            useLegacyPackaging = false
+        }
+    }
+
 }
+
+// ── 16 KB page-size compatibility ──────────────────────────────────────────
+// All .so dependencies already ship with ELF p_align = 0x4000, no patching
+// needed. Verified: libopencv_java4.so, libc++_shared.so, etc.
+// ─────────────────────────────────────────────────────────────────────────────
 
 dependencies {
     implementation(libs.androidx.core.ktx)
@@ -104,6 +117,8 @@ dependencies {
     implementation(libs.play.services.auth)
     implementation(libs.socket.io)
     implementation(libs.webrtc)
+
+    implementation("com.quickbirdstudios:opencv:4.5.3.0")
 
     implementation(libs.androidx.room.runtime)
     implementation(libs.androidx.room.ktx)

@@ -23,6 +23,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.DirectionsRun
 import androidx.compose.material.icons.automirrored.filled.VolumeUp
 import androidx.compose.material.icons.filled.FiberManualRecord
 import androidx.compose.material.icons.filled.Mic
@@ -98,6 +99,8 @@ fun ViewerScreen(sessionId: String, onBack: () -> Unit, viewModel: CameraViewMod
     var showDeclineDialog by remember { mutableStateOf(false) }
 
     val isRecording by viewModel.isRecording.observeAsState(false)
+    val motionDetected by viewModel.motionDetected.observeAsState(false)
+    val personDetected by viewModel.personDetected.observeAsState(false)
 
     // Session Status Observer
     LaunchedEffect(sessionStatus) {
@@ -271,6 +274,20 @@ fun ViewerScreen(sessionId: String, onBack: () -> Unit, viewModel: CameraViewMod
                 },
                 text = "4.2 MB/S"
             )
+
+            if (motionDetected) {
+                StatusCapsule(
+                    icon = {
+                        Icon(
+                            Icons.AutoMirrored.Filled.DirectionsRun,
+                            contentDescription = null,
+                            tint = if (personDetected) Color.Red else Color.Yellow,
+                            modifier = Modifier.size(12.dp)
+                        )
+                    },
+                    text = if (personDetected) "PERSON" else "MOTION"
+                )
+            }
 
             Spacer(modifier = Modifier.weight(1f))
 

@@ -63,6 +63,17 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
     val sessionStatus: LiveData<String?> = webRTCManager.sessionStatus
     val isFrontFacing: LiveData<Boolean> = webRTCManager.isFrontFacingLiveData
 
+    // Motion Detection
+    val motionDetected: LiveData<Boolean> = webRTCManager.motionDetected
+    val personDetected: LiveData<Boolean> = webRTCManager.personDetected
+    private lateinit var alertManager: AlertManager
+    private var openCvDetector: OpenCvDetector? = null
+    private var motionEnabled: Boolean = true
+    private var personDetectionEnabled: Boolean = true
+    private var localMotionSink: MotionDetectionSink? = null
+    private var remoteMotionSink: MotionDetectionSink? = null
+    private val personTracker = PersonTracker()
+
     private val _connectedViewers = MutableLiveData<List<ViewerInfo>>(emptyList())
     val connectedViewers: LiveData<List<ViewerInfo>> = _connectedViewers
 
@@ -209,6 +220,13 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
 
                 override fun onCancelled(error: DatabaseError) {}
             })
+
+        // Initialize AlertManager and OpenCvDetector
+        alertManager = AlertManager(application, cameraActivityDao, viewModelScope)
+        openCvDetector = OpenCvDetector(application)
+        if (personDetectionEnabled) {
+            openCvDetector?.initialize()
+        }
 
         // Observe connection state to mark as paired
         webRTCManager.connectionState.observeForever { connected ->
@@ -987,6 +1005,83 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         }.start()
     }
 
+    private var motionResetHandler: android.os.Handler? = null
+    private var motionResetRunnable: Runnable? = null
+
+    fun createMotionSink(role: String = "camera"): MotionDetectionSink {
+        return MotionDetectionSink(
+            onMotionDetected = { percentage, frameData ->
+                if (motionEnabled) {
+                    webRTCManager.setMotionDetected(true, percentage)
+                    scheduleMotionReset()
+
+                    val devName = resolveDeviceName()
+                    alertManager.logMotion(percentage, role, devName)
+
+                    if (personDetectionEnabled && openCvDetector?.isAvailable() == true && frameData != null) {
+                        viewModelScope.launch(Dispatchers.IO) {
+                            try {
+                                val bitmap = MotionDetector.toBitmap(
+                                    frameData.yPlane, frameData.uPlane, frameData.vPlane,
+                                    frameData.width, frameData.height, frameData.strideY
+                                )
+                                if (bitmap != null) {
+                                    val result = openCvDetector?.detect(bitmap)
+                                    if (result != null) {
+                                        val boxes = result.personBoxes.map { BBox(it.x, it.y, it.width, it.height) }
+                                        val trackerResult = personTracker.update(boxes)
+
+                                        webRTCManager.setPersonDetected(trackerResult.hasPerson)
+
+                                        for (newTrack in trackerResult.newTracks) {
+                                            alertManager.logPersonDetected(role, deviceName = devName, personId = newTrack.id)
+                                        }
+                                    }
+                                }
+                            } catch (e: Exception) {
+                                Log.e(tag, "OpenCV detection error: ${e.message}")
+                            }
+                        }
+                    }
+                }
+            },
+            intervalMs = 200L
+        )
+    }
+
+    private fun resolveDeviceName(): String {
+        val name = deviceName.value
+        return if (name.isNullOrBlank()) "Camera" else name
+    }
+
+    private fun scheduleMotionReset() {
+        val handler = motionResetHandler ?: run {
+            android.os.Handler(android.os.Looper.getMainLooper()).also { motionResetHandler = it }
+        }
+        motionResetRunnable?.let { handler.removeCallbacks(it) }
+        val r = Runnable {
+            webRTCManager.setMotionDetected(false, 0f)
+        }
+        motionResetRunnable = r
+        handler.postDelayed(r, 3000L)
+    }
+
+    private fun setupLocalMotionDetection(role: String = "camera") {
+        localMotionSink?.let { webRTCManager.removeLocalMotionSink() }
+        val sink = createMotionSink(role)
+        localMotionSink = sink
+        webRTCManager.addLocalMotionSink(sink)
+    }
+
+    private fun setupRemoteMotionDetection(role: String = "monitor") {
+        remoteMotionSink?.let { webRTCManager.removeAllRemoteMotionSinks() }
+        val sink = createMotionSink(role)
+        remoteMotionSink = sink
+        activePreviewSessionIds.value?.forEach { sid ->
+            webRTCManager.addRemoteMotionSink(sid, sink)
+        }
+    }
+
     fun startStreaming(localSink: VideoSink?, isAudio: Boolean, sid: String? = null) {
         this.isAudio = isAudio
         // If sid is "new" or we want a fresh start, clear the existing session
@@ -1011,11 +1106,6 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         logActivity("Camera Started", name, "camera_start", "camera")
         _isBroadcasting.postValue(true)
 
-        /*// Ensure we are marked as Live when starting streaming if not already done via resumeHostSession
-        val ref = FirebaseDatabase.getInstance().getReference("SaveSessions/$dId")
-        ref.setValue(sessionToUse)
-        ref.onDisconnect().removeValue()*/
-
         webRTCManager.startCameraAndOffer(
             sessionToUse,
             dId,
@@ -1027,6 +1117,9 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                     Log.d(tag, "Offer created for session: $sessionToUse")
                 }
             })
+
+        Log.e("check8521", "Streaming start")
+        if (motionEnabled) setupLocalMotionDetection("camera")
     }
 
     fun initRenderer(renderer: SurfaceViewRenderer, isLocal: Boolean = true) {
@@ -1066,11 +1159,19 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         // so we don't set _isBroadcasting here.
 
         webRTCManager.connectAsViewer(sessionId, remoteSink, dId)
+        if (motionEnabled) setupRemoteMotionDetection("monitor")
     }
 
     fun startRemotePreview(sessionId: String, sink: VideoSink) {
         val dId = myDeviceId.value ?: ""
+        val currentSessions = activePreviewSessionIds.value ?: emptySet()
+        activePreviewSessionIds.postValue(currentSessions + sessionId)
         webRTCManager.connectAsViewer(sessionId, sink, dId)
+        if (motionEnabled && remoteMotionSink == null) {
+            setupRemoteMotionDetection("monitor")
+        } else if (motionEnabled && remoteMotionSink != null) {
+            webRTCManager.addRemoteMotionSink(sessionId, remoteMotionSink!!)
+        }
     }
 
     fun stopRemotePreview(sessionId: String? = null) {
@@ -1093,7 +1194,11 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     fun stopViewing(sink: VideoSink? = null) {
+        motionResetRunnable?.let { motionResetHandler?.removeCallbacks(it) }
         sink?.let { webRTCManager.removeRemoteSink(it) }
+        webRTCManager.removeAllRemoteMotionSinks()
+        remoteMotionSink = null
+        personTracker.reset()
 
         val name = deviceName.value ?: "This device"
         logActivity("Viewing Stopped", "Disconnected from camera", "monitor_disconnect", "monitor")
@@ -1106,7 +1211,11 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     fun stopStreaming(sink: VideoSink? = null) {
+        motionResetRunnable?.let { motionResetHandler?.removeCallbacks(it) }
         sink?.let { webRTCManager.removeLocalSink(it) }
+        webRTCManager.removeLocalMotionSink()
+        localMotionSink = null
+        personTracker.reset()
         val name = deviceName.value ?: "This device"
         logActivity("Camera Stopped", name, "camera_stop", "camera")
 
@@ -1118,7 +1227,14 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     fun stop() {
-        // stop() is kept for legacy but try to be more surgical
+        motionResetRunnable?.let { motionResetHandler?.removeCallbacks(it) }
+        motionResetHandler?.removeCallbacksAndMessages(null)
+        webRTCManager.removeLocalMotionSink()
+        localMotionSink = null
+        webRTCManager.removeAllRemoteMotionSinks()
+        remoteMotionSink = null
+        personTracker.reset()
+
         sessionId.value?.let { sid ->
             if (sid.isNotEmpty()) {
                 val did = myDeviceId.value
@@ -1143,6 +1259,8 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
 
     fun switchCamera() {
         webRTCManager.switchCamera()
+        webRTCManager.setMotionDetected(false, 0f)
+        webRTCManager.setPersonDetected(false)
     }
 
     fun startRecording(context: Context, audioOnly: Boolean = false) {

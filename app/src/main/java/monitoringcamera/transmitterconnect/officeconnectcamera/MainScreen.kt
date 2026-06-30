@@ -56,6 +56,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowForward
+import androidx.compose.material.icons.automirrored.filled.DirectionsRun
 import androidx.compose.material.icons.automirrored.filled.Logout
 import androidx.compose.material.icons.automirrored.outlined.HelpOutline
 import androidx.compose.material.icons.filled.Add
@@ -65,12 +66,16 @@ import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Devices
+import androidx.compose.material.icons.filled.DirectionsCar
 import androidx.compose.material.icons.filled.FlashOff
 import androidx.compose.material.icons.filled.FlashOn
+import androidx.compose.material.icons.filled.FiberManualRecord
 import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.GridView
 import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.Keyboard
+import androidx.compose.material.icons.filled.Link
+import androidx.compose.material.icons.filled.LinkOff
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.Laptop
 import androidx.compose.material.icons.filled.Mic
@@ -78,10 +83,12 @@ import androidx.compose.material.icons.filled.MicOff
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Notifications
 import androidx.compose.material.icons.filled.Person
+import androidx.compose.material.icons.filled.Pets
 import androidx.compose.material.icons.filled.PlayCircle
 import androidx.compose.material.icons.filled.Podcasts
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Router
+import androidx.compose.material.icons.filled.Screenshot
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Share
@@ -606,6 +613,7 @@ fun AlertsContent(
     val filters = listOf("ALL", "PEOPLE", "PETS", "VEHICLE", "MOTION", "SYSTEM")
 
     val user by authViewModel.user.collectAsState()
+    val cameraActivities by viewModel.cameraActivities.observeAsState(emptyList())
     val fullName = remember(user) {
         val prefs = context.getSharedPreferences("app_prefs", Context.MODE_PRIVATE)
         prefs.getString("full_name", user?.displayName ?: "User") ?: "User"
@@ -613,6 +621,53 @@ fun AlertsContent(
     val profileImageUri = remember(user) {
         val prefs = context.getSharedPreferences("app_prefs", Context.MODE_PRIVATE)
         prefs.getString("profile_image", "")
+    }
+
+    val filterToIconPrefix = remember {
+        mapOf(
+            "PEOPLE" to listOf("person", "face"),
+            "PETS" to listOf("pet"),
+            "VEHICLE" to listOf("vehicle"),
+            "MOTION" to listOf("motion"),
+            "SYSTEM" to listOf("camera_start", "camera_stop", "monitor_connect", "monitor_disconnect",
+                "video_record", "screenshot")
+        )
+    }
+
+    val filteredActivities = remember(cameraActivities, selectedFilter, searchQuery) {
+        var result = cameraActivities
+        if (selectedFilter != "ALL") {
+            val prefixes = filterToIconPrefix[selectedFilter] ?: listOf(selectedFilter.lowercase())
+            result = result.filter { activity ->
+                prefixes.any { activity.iconType.startsWith(it) }
+            }
+        }
+        if (searchQuery.isNotBlank()) {
+            val query = searchQuery.lowercase()
+            result = result.filter {
+                it.title.lowercase().contains(query) ||
+                it.subtitle.lowercase().contains(query)
+            }
+        }
+        result
+    }
+
+    val filterCounts = remember(cameraActivities, filters) {
+        filters.associateWith { filter ->
+            if (filter == "ALL") cameraActivities.size
+            else {
+                val prefixes = filterToIconPrefix[filter] ?: listOf(filter.lowercase())
+                cameraActivities.count { activity ->
+                    prefixes.any { activity.iconType.startsWith(it) }
+                }
+            }
+        }
+    }
+
+    val alertSubtitle = when {
+        cameraActivities.isEmpty() -> "NO NEW ALERTS"
+        filteredActivities.size == cameraActivities.size -> "${cameraActivities.size} total alerts"
+        else -> "${filteredActivities.size} of ${cameraActivities.size} alerts"
     }
 
     Column(
@@ -659,13 +714,13 @@ fun AlertsContent(
                     fontWeight = FontWeight.Bold
                 )
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                        Text(
-                            text = "NO NEW ALERTS",
-                            color = textGrey,
-                            fontSize = 10.sp,
-                            fontWeight = FontWeight.Bold,
-                            letterSpacing = 0.5.sp
-                        )
+                    Text(
+                        text = alertSubtitle,
+                        color = textGrey,
+                        fontSize = 10.sp,
+                        fontWeight = FontWeight.Bold,
+                        letterSpacing = 0.5.sp
+                    )
                 }
             }
         }
@@ -724,14 +779,136 @@ fun AlertsContent(
             items(filters) { filter ->
                 AlertFilterChip(
                     text = filter,
-                    count = 0,
+                    count = filterCounts[filter] ?: 0,
                     isSelected = selectedFilter == filter,
                     onClick = { selectedFilter = filter }
                 )
             }
         }
 
-        Spacer(modifier = Modifier.height(24.dp))
+        Spacer(modifier = Modifier.height(16.dp))
+
+        // 4. Alert List
+        if (filteredActivities.isEmpty()) {
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .weight(1f),
+                contentAlignment = Alignment.Center
+            ) {
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    Icon(
+                        Icons.Outlined.Notifications,
+                        contentDescription = null,
+                        tint = textGrey.copy(alpha = 0.3f),
+                        modifier = Modifier.size(48.dp)
+                    )
+                    Spacer(modifier = Modifier.height(12.dp))
+                    Text(
+                        text = "No alerts found",
+                        color = textGrey,
+                        fontSize = 14.sp
+                    )
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Text(
+                        text = if (selectedFilter != "ALL") "Try a different filter" else "Alerts will appear here",
+                        color = textGrey.copy(alpha = 0.5f),
+                        fontSize = 12.sp
+                    )
+                }
+            }
+        } else {
+            LazyColumn(
+                modifier = Modifier.weight(1f),
+                verticalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                items(filteredActivities, key = { it.id }) { activity ->
+                    AlertItem(activity = activity)
+                }
+            }
+        }
+
+        Spacer(modifier = Modifier.height(16.dp))
+    }
+}
+
+@Composable
+fun AlertItem(activity: CameraActivity) {
+    val icon = when {
+        activity.iconType.startsWith("person") || activity.iconType.startsWith("face") ->
+            Icons.Default.Person
+        activity.iconType.startsWith("pet") -> Icons.Default.Pets
+        activity.iconType.startsWith("vehicle") -> Icons.Default.DirectionsCar
+        activity.iconType.startsWith("motion") -> Icons.AutoMirrored.Filled.DirectionsRun
+        activity.iconType.startsWith("camera_start") -> Icons.Default.Videocam
+        activity.iconType.startsWith("camera_stop") -> Icons.Default.VideocamOff
+        activity.iconType.startsWith("monitor_connect") -> Icons.Default.Link
+        activity.iconType.startsWith("monitor_disconnect") -> Icons.Default.LinkOff
+        activity.iconType.startsWith("video_record") -> Icons.Default.FiberManualRecord
+        activity.iconType.startsWith("screenshot") -> Icons.Default.Screenshot
+        else -> Icons.Default.Notifications
+    }
+
+    val iconColor = when {
+        activity.iconType.startsWith("motion") -> Color.Yellow.copy(alpha = 0.8f)
+        activity.iconType.startsWith("person") || activity.iconType.startsWith("face") -> Color.Red.copy(alpha = 0.8f)
+        activity.iconType.startsWith("pet") -> Color(0xFF77AEFF)
+        activity.iconType.startsWith("vehicle") -> Color(0xFFFF8A65)
+        activity.iconType.startsWith("camera_start") -> Color.Green.copy(alpha = 0.8f)
+        activity.iconType.startsWith("camera_stop") -> Color.Gray
+        activity.iconType.startsWith("monitor_disconnect") -> Color(0xFFFF8A80)
+        else -> Color.White.copy(alpha = 0.6f)
+    }
+
+    val timeText = remember(activity.timestamp) {
+        val sdf = SimpleDateFormat("MMM dd, HH:mm", Locale.getDefault())
+        sdf.format(Date(activity.timestamp))
+    }
+
+    Surface(
+        color = Color(0xFF161B22),
+        shape = RoundedCornerShape(12.dp)
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(12.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Surface(
+                modifier = Modifier.size(36.dp),
+                shape = CircleShape,
+                color = Color(0xFF1B232D)
+            ) {
+                Box(contentAlignment = Alignment.Center) {
+                    Icon(
+                        imageVector = icon,
+                        contentDescription = null,
+                        tint = iconColor,
+                        modifier = Modifier.size(18.dp)
+                    )
+                }
+            }
+            Spacer(modifier = Modifier.width(12.dp))
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = activity.title,
+                    color = Color.White,
+                    fontSize = 13.sp,
+                    fontWeight = FontWeight.SemiBold
+                )
+                Text(
+                    text = activity.subtitle,
+                    color = Color(0xFF9CA3AF),
+                    fontSize = 11.sp
+                )
+            }
+            Text(
+                text = timeText,
+                color = Color(0xFF9CA3AF).copy(alpha = 0.6f),
+                fontSize = 9.sp
+            )
+        }
     }
 }
 
@@ -1838,6 +2015,9 @@ fun RemoteDeviceCard(
     onClick: () -> Unit,
     modifier: Modifier = Modifier
 ) {
+    val motionDetected by viewModel.motionDetected.observeAsState(false)
+    val personDetected by viewModel.personDetected.observeAsState(false)
+
     Card(
         modifier = modifier
             .clickable { onClick() },
@@ -1881,7 +2061,7 @@ fun RemoteDeviceCard(
                 Row(
                     modifier = Modifier.align(Alignment.TopStart),
                     verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
                 ) {
                     // 1. Live Indicator (Always live for active preview)
                     Row(
@@ -1902,7 +2082,35 @@ fun RemoteDeviceCard(
                         )
                     }
 
-                    // 2. Device Name Label
+                    // 2. Motion/Person Indicator
+                    if (motionDetected) {
+                        Row(
+                            modifier = Modifier
+                                .background(
+                                    if (personDetected) Color.Red.copy(alpha = 0.7f)
+                                    else Color.Yellow.copy(alpha = 0.6f),
+                                    RoundedCornerShape(12.dp)
+                                )
+                                .padding(horizontal = 8.dp, vertical = 4.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Canvas(modifier = Modifier.size(6.dp)) {
+                                drawCircle(
+                                    color = Color.White,
+                                    radius = size.minDimension / 2
+                                )
+                            }
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text(
+                                if (personDetected) "PERSON" else "MOTION",
+                                color = Color.White,
+                                fontSize = 10.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
+                    }
+
+                    // 3. Device Name Label
                     Surface(
                         color = Color.White.copy(alpha = 0.2f),
                         shape = RoundedCornerShape(12.dp)
