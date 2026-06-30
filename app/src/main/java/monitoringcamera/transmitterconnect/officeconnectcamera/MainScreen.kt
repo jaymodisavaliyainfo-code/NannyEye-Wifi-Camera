@@ -1139,7 +1139,8 @@ fun DashboardContent(
                         if (isConnected) {
                             navController.navigate("camera_view/${Uri.encode(sessionId)}")
                         }
-                    }
+                    },
+                    modifier = Modifier.size(width = 280.dp, height = 300.dp)
                 )
             }
             activePreviewSessions.forEach { sid ->
@@ -1154,7 +1155,8 @@ fun DashboardContent(
                         },
                         onClick = {
                             navController.navigate("viewer/${Uri.encode(sid)}")
-                        }
+                        },
+                        modifier = Modifier.size(width = 280.dp, height = 300.dp)
                     )
                 }
             }
@@ -1608,9 +1610,9 @@ fun ThisDeviceCard(
     sessionId: String,
     viewModel: CameraViewModel,
     onStartCamera: () -> Unit,
-    onCardClick: () -> Unit
+    onCardClick: () -> Unit,
+    modifier: Modifier = Modifier
 ) {
-    val density = LocalDensity.current
     val cardWidth = 280.dp
     val cardHeight = 300.dp
 
@@ -1625,8 +1627,7 @@ fun ThisDeviceCard(
     }
 
     Card(
-        modifier = Modifier
-            .size(width = cardWidth, height = cardHeight)
+        modifier = modifier
             .clickable(enabled = isBroadcasting) { onCardClick() },
         shape = RoundedCornerShape(24.dp),
         colors = CardDefaults.cardColors(containerColor = Color(0xFF161B22))
@@ -1834,14 +1835,11 @@ fun RemoteDeviceCard(
     deviceName: String,
     viewModel: CameraViewModel,
     onClose: () -> Unit,
-    onClick: () -> Unit
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier
 ) {
-    val cardWidth = 280.dp
-    val cardHeight = 300.dp
-
     Card(
-        modifier = Modifier
-            .size(width = cardWidth, height = cardHeight)
+        modifier = modifier
             .clickable { onClick() },
         shape = RoundedCornerShape(24.dp),
         colors = CardDefaults.cardColors(containerColor = Color(0xFF161B22))
@@ -1940,10 +1938,9 @@ fun RemoteDeviceCard(
 }
 
 @Composable
-fun AddCameraCard(onClick: () -> Unit) {
+fun AddCameraCard(onClick: () -> Unit, modifier: Modifier = Modifier) {
     Card(
-        modifier = Modifier
-            .size(width = 240.dp, height = 300.dp)
+        modifier = modifier.size(280.dp, 300.dp)
             .clickable { onClick() },
         shape = RoundedCornerShape(32.dp),
         colors = CardDefaults.cardColors(containerColor = Color(0xFF0E1116)),

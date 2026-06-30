@@ -90,8 +90,7 @@ fun LoginScreen(
                                         isLoading = false
                                         if (document.exists() && !document.getString("username").isNullOrBlank()) {
                                             // User already complete, go to Main
-                                            viewModel.isGoogleLogin = true
-                                            onNavigateToStep4()
+                                            onLoginSuccess()
                                         } else {
                                             // New user or incomplete, proceed to Step 4
                                             viewModel.isGoogleLogin = true
@@ -240,10 +239,29 @@ fun LoginScreen(
                                 // Direct login with email
                                 auth.signInWithEmailAndPassword(trimmedInput, password)
                                     .addOnCompleteListener { task ->
-                                        isLoading = false
                                         if (task.isSuccessful) {
-                                            onNavigateToStep4()
+                                            val user = auth.currentUser
+                                            if (user != null) {
+                                                val db = FirebaseFirestore.getInstance()
+                                                db.collection("users").document(user.uid).get()
+                                                    .addOnSuccessListener { document ->
+                                                        isLoading = false
+                                                        if (document.exists() && !document.getString("username").isNullOrBlank()) {
+                                                            onLoginSuccess()
+                                                        } else {
+                                                            onNavigateToStep4()
+                                                        }
+                                                    }
+                                                    .addOnFailureListener {
+                                                        isLoading = false
+                                                        onNavigateToStep4()
+                                                    }
+                                            } else {
+                                                isLoading = false
+                                                onNavigateToStep4()
+                                            }
                                         } else {
+                                            isLoading = false
                                             Toast.makeText(context, "Login Failed: ${task.exception?.message}", Toast.LENGTH_SHORT).show()
                                         }
                                     }

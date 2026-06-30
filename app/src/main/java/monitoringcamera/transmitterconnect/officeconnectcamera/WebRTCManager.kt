@@ -102,7 +102,22 @@ class WebRTCManager(private val context: Context) {
     }
 
     fun getSessionConnectionState(sessionId: String): LiveData<Boolean> {
-        return sessionConnectionStates.getOrPut(sessionId) { MutableLiveData<Boolean>(false) }
+        val ld = sessionConnectionStates.getOrPut(sessionId) { MutableLiveData<Boolean>(false) }
+        
+        // Immediate check: if we already have a connected peer for this session, update LD
+        val isCurrentlyConnected = viewerSessions[sessionId]?.peerConnection?.let { pc ->
+            val state = pc.iceConnectionState()
+            state == PeerConnection.IceConnectionState.CONNECTED || state == PeerConnection.IceConnectionState.COMPLETED
+        } ?: hostSessions[sessionId]?.viewerPeerConnections?.values?.any { pc ->
+            val state = pc.iceConnectionState()
+            state == PeerConnection.IceConnectionState.CONNECTED || state == PeerConnection.IceConnectionState.COMPLETED
+        } ?: false
+        
+        if (isCurrentlyConnected && ld.value != true) {
+            ld.postValue(true)
+        }
+        
+        return ld
     }
 
     private fun buildRtcConfig(): PeerConnection.RTCConfiguration {
@@ -475,8 +490,22 @@ class WebRTCManager(private val context: Context) {
 
                 override fun onIceConnectionChange(state: PeerConnection.IceConnectionState) {
                     Log.d(TAG, "ICE State for $sessionId ($viewerId): $state")
+                    
+                    // Update per-session state
                     val connected = state == PeerConnection.IceConnectionState.CONNECTED || state == PeerConnection.IceConnectionState.COMPLETED
-                    sessionConnectionStates[sessionId]?.postValue(connected)
+                    
+                    if (isCaller) {
+                        // Host side: Connected if AT LEAST ONE viewer is connected
+                        val anyConnected = hostSessions[sessionId]?.viewerPeerConnections?.values?.any { pc ->
+                            val pcState = pc.iceConnectionState()
+                            pcState == PeerConnection.IceConnectionState.CONNECTED || pcState == PeerConnection.IceConnectionState.COMPLETED
+                        } ?: connected // Fallback to current event if map not updated yet
+                        sessionConnectionStates[sessionId]?.postValue(anyConnected)
+                    } else {
+                        // Viewer side: Only one connection
+                        sessionConnectionStates[sessionId]?.postValue(connected)
+                    }
+
                     updateOverallConnectionState()
                     onConnectionEvent?.invoke(sessionId, isCaller, viewerId, connected)
                 }
