@@ -23,8 +23,8 @@ class MonitorWallViewModel(application: Application) : AndroidViewModel(applicat
     private val database = FirebaseDatabase.getInstance()
     private val webRTCManager = WebRTCManager(application)
 
-    private val _savedDevices = MutableStateFlow<List<PairedDevice>>(emptyList())
-    val savedDevices: StateFlow<List<PairedDevice>> = _savedDevices
+    private val _connectedMonitors = MutableStateFlow<List<PairedDevice>>(emptyList())
+    val connectedMonitors: StateFlow<List<PairedDevice>> = _connectedMonitors
 
     private val _onlineMonitors = MutableLiveData<Map<String, CameraViewModel.MonitorInfo>>(emptyMap())
     val onlineMonitors: LiveData<Map<String, CameraViewModel.MonitorInfo>> = _onlineMonitors
@@ -47,21 +47,22 @@ class MonitorWallViewModel(application: Application) : AndroidViewModel(applicat
     )
 
     init {
-        listenToSavedDevices()
+        listenToConnectedMonitors()
         listenToOnlineMonitors()
     }
 
-    private fun listenToSavedDevices() {
+    private fun listenToConnectedMonitors() {
         val uid = auth.currentUser?.uid ?: return
         firestore.collection("users").document(uid)
-            .collection("savedDevices")
+            .collection("Session").document("active_session")
+            .collection("ConnectedMonitors")
             .addSnapshotListener { snapshot, error ->
                 if (error != null) {
                     Log.e(tag, "Firestore error: ${error.message}")
                     return@addSnapshotListener
                 }
                 val devices = snapshot?.toObjects(PairedDevice::class.java) ?: emptyList()
-                _savedDevices.value = devices.filter { it.role == "monitor" }
+                _connectedMonitors.value = devices.filter { it.role == "monitor" }
             }
     }
 
@@ -120,7 +121,7 @@ class MonitorWallViewModel(application: Application) : AndroidViewModel(applicat
         super.onCleared()
         // We rely on the shared WebRTCManager lifecycle managed by CameraViewModel
         // to avoid interrupting concurrent sessions when navigating away from the wall.
-        /*_savedDevices.value.forEach {
+        /*_connectedMonitors.value.forEach {
             if (it.sessionId.isNotEmpty()) {
                 webRTCManager.stopViewer(it.sessionId)
             }

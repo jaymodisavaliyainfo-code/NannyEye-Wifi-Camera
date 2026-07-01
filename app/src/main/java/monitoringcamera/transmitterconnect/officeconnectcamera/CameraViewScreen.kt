@@ -2,6 +2,7 @@ package monitoringcamera.transmitterconnect.officeconnectcamera
 
 import android.view.ViewGroup
 import android.widget.FrameLayout
+import android.content.Context
 import androidx.annotation.OptIn
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
@@ -323,7 +324,7 @@ fun CameraViewScreen(
             }
 
             Spacer(modifier = Modifier.weight(1f))
-            
+
             // Dedicated Back Button in top right as requested
             IconButton(
                 onClick = onBack,

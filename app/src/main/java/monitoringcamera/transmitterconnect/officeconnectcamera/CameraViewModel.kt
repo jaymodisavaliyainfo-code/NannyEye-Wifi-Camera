@@ -68,6 +68,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
     val personDetected: LiveData<Boolean> = webRTCManager.personDetected
     private lateinit var alertManager: AlertManager
     private var openCvDetector: OpenCvDetector? = null
+    private var mlKitDetector: MlKitDetector = MlKitDetector()
     private var motionEnabled: Boolean = true
     private var personDetectionEnabled: Boolean = true
     private var localMotionSink: MotionDetectionSink? = null
@@ -91,6 +92,8 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
     // Persistent storage for settings and limits (kept for device-specific values)
     private val settingsPrefs =
         application.getSharedPreferences("app_settings", Context.MODE_PRIVATE)
+    private val appPrefs =
+        application.getSharedPreferences("app_prefs", Context.MODE_PRIVATE)
     private val limitPrefs =
         application.getSharedPreferences("DailyLimitPrefs", Context.MODE_PRIVATE)
 
@@ -200,7 +203,13 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         loadDailyLimit()
         observeLocalActivities()
         observeLocalDevices()
-        listenForFirestoreReconnectRequests()
+        
+        // Ensure listener starts when UID is available
+        auth.addAuthStateListener { firebaseAuth ->
+            if (firebaseAuth.currentUser != null) {
+                listenForFirestoreReconnectRequests()
+            }
+        }
 
         // Listen for all online monitors to enable stable reconnection
         FirebaseDatabase.getInstance().getReference("monitors")
@@ -224,6 +233,9 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         // Initialize AlertManager and OpenCvDetector
         alertManager = AlertManager(application, cameraActivityDao, viewModelScope)
         openCvDetector = OpenCvDetector(application)
+        
+        applyPreferences()
+        
         if (personDetectionEnabled) {
             openCvDetector?.initialize()
         }
@@ -704,7 +716,8 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
             "timestamp" to System.currentTimeMillis()
         )
         firestore.collection("users").document(uid)
-            .collection("connectedViewers").document(viewerId)
+            .collection("Session").document("active_session")
+            .collection("ConnectedViewers").document(viewerId)
             .set(viewerData)
     }
 
@@ -718,7 +731,8 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
             "role" to "monitor"
         )
         firestore.collection("users").document(uid)
-            .collection("savedDevices").document(deviceId)
+            .collection("Session").document("active_session")
+            .collection("ConnectedMonitors").document(deviceId)
             .set(deviceData)
     }
 
@@ -859,49 +873,120 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         }
     }
 
+    val requestDeclinedMessage = MutableLiveData<String?>(null)
+    private var sentRequestStatusListener: ListenerRegistration? = null
+
     private fun sendFirestoreReconnectRequest(sId: String, rId: String, hId: String, viewerDeviceId: String) {
+        val uid = auth.currentUser?.uid
+        if (uid == null) {
+            Log.e(tag, "sendFirestoreReconnectRequest failed: User is not logged in")
+            return
+        }
+
         val requestId = UUID.randomUUID().toString()
-        Log.d(tag, "Creating Firestore reconnect request: $requestId for viewer: $viewerDeviceId")
+        Log.d(tag, "Creating Firestore reconnect request: $requestId for viewer: $viewerDeviceId (Host UID: $uid)")
+        
         val request = ReconnectRequest(
             requestId = requestId,
-            hostId = hId,
+            hostId = hId.ifEmpty { myDeviceId.value ?: "" },
             viewerId = viewerDeviceId,
-            roomId = rId,
+            roomId = rId.ifEmpty { sId },
             sessionId = sId,
             hostName = deviceName.value ?: "NannyEye Monitor",
             status = "pending",
             createdAt = System.currentTimeMillis()
         )
-        firestore.collection("ReconnectRequests").document(requestId).set(request)
+
+        val requestDoc = firestore.collection("users").document(uid)
+            .collection("Session").document("active_session")
+            .collection("ReconnectRequests").document(requestId)
+
+        requestDoc.set(request)
             .addOnSuccessListener {
                 Log.d(tag, "Firestore reconnect request sent successfully")
+                // Listen for status changes (accepted/declined)
+                listenForRequestResponse(requestDoc, viewerDeviceId)
             }
             .addOnFailureListener { e ->
                 Log.e(tag, "Failed to send Firestore reconnect request: ${e.message}")
             }
     }
+
+    private fun listenForRequestResponse(docRef: com.google.firebase.firestore.DocumentReference, viewerDeviceId: String) {
+        sentRequestStatusListener?.remove()
+        sentRequestStatusListener = docRef.addSnapshotListener { snapshot, e ->
+            if (e != null || snapshot == null || !snapshot.exists()) return@addSnapshotListener
+            
+            val status = snapshot.getString("status") ?: "pending"
+            val viewerName = _savedViewers.value?.find { it.deviceId == viewerDeviceId }?.name ?: "Monitor"
+            
+            if (status == "declined") {
+                Log.d(tag, "Reconnect request declined by $viewerName")
+                requestDeclinedMessage.postValue("$viewerName declined your request")
+                
+                // Stop streaming as the intended viewer declined
+                stopStreaming()
+                
+                // Clean up listener
+                sentRequestStatusListener?.remove()
+                sentRequestStatusListener = null
+            } else if (status == "accepted") {
+                Log.d(tag, "Reconnect request accepted by $viewerName")
+                // Success - streaming continues as viewer will connect via WebRTC
+                sentRequestStatusListener?.remove()
+                sentRequestStatusListener = null
+            }
+        }
+    }
     
     val incomingReconnectRequest = MutableLiveData<Map<String, String>?>(null)
 
+    /**
+     * Listens for incoming reconnection requests.
+     * Note: Uses collectionGroup to find requests sent by ANY host to THIS viewer's device ID.
+     * IMPORTANT: This requires a 'collectionGroup' index in the Firebase Console for 'ReconnectRequests'.
+     * If the index is missing, check Logcat for a link to generate it.
+     */
+    private var reconnectRequestsListener: ListenerRegistration? = null
+
     private fun listenForFirestoreReconnectRequests() {
         val dId = myDeviceId.value ?: return
-        firestore.collection("ReconnectRequests")
+
+        reconnectRequestsListener?.remove()
+
+        // We use collectionGroup because the request might be in the Host's UID path,
+        // not the Viewer's UID path.
+        Log.d(tag, "Listening for ALL ReconnectRequests where viewerId is: $dId")
+
+        reconnectRequestsListener = firestore.collectionGroup("ReconnectRequests")
             .whereEqualTo("viewerId", dId)
             .whereEqualTo("status", "pending")
             .addSnapshotListener { snapshots, e ->
-                if (e != null) return@addSnapshotListener
-                
+                if (e != null) {
+                    Log.e(tag, "Error listening for ReconnectRequests: ${e.message}")
+                    return@addSnapshotListener
+                }
+
                 val requests = snapshots?.toObjects(ReconnectRequest::class.java) ?: emptyList()
+                Log.d(tag, "ReconnectRequests (collectionGroup) received. Count: ${requests.size}")
+
                 if (requests.isNotEmpty()) {
-                    val req = requests.first()
-                    val map = mapOf(
-                        "sessionId" to req.sessionId,
-                        "roomId" to req.roomId,
-                        "hostId" to req.hostId,
-                        "hostName" to req.hostName,
-                        "requestId" to req.requestId
-                    )
-                    incomingReconnectRequest.postValue(map)
+                    // Get the most recent request
+                    val req = requests.sortedByDescending { it.createdAt }.first()
+                    val doc = snapshots!!.documents.find { it.get("requestId") == req.requestId || it.id == req.requestId }
+
+                    if (doc != null) {
+                        Log.d(tag, "Request found! Host: ${req.hostName}, Path: ${doc.reference.path}")
+                        val map = mapOf(
+                            "sessionId" to req.sessionId,
+                            "roomId" to req.roomId,
+                            "hostId" to req.hostId,
+                            "hostName" to req.hostName,
+                            "requestId" to req.requestId,
+                            "docPath" to doc.reference.path
+                        )
+                        incomingReconnectRequest.postValue(map)
+                    }
                 } else {
                     incomingReconnectRequest.postValue(null)
                 }
@@ -909,14 +994,39 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     fun acceptFirestoreReconnectRequest(requestId: String) {
-        firestore.collection("ReconnectRequests").document(requestId)
-            .update("status", "accepted")
+        val path = incomingReconnectRequest.value?.get("docPath")
+        if (path != null) {
+            // Update the actual document at its host location
+            firestore.document(path).update("status", "accepted")
+                .addOnSuccessListener { incomingReconnectRequest.postValue(null) }
+        } else {
+            // Fallback if path is missing
+            firestore.collectionGroup("ReconnectRequests")
+                .whereEqualTo("requestId", requestId)
+                .get()
+                .addOnSuccessListener { snapshots ->
+                    for (doc in snapshots) {
+                        doc.reference.update("status", "accepted")
+                    }
+                    incomingReconnectRequest.postValue(null)
+                }
+        }
     }
 
     fun declineFirestoreReconnectRequest(requestId: String) {
-        firestore.collection("ReconnectRequests").document(requestId)
-            .update("status", "declined")
-        incomingReconnectRequest.postValue(null)
+        val path = incomingReconnectRequest.value?.get("docPath")
+        if (path != null) {
+            Log.d(tag, "Declining reconnect request at path: $path")
+            firestore.document(path).update("status", "declined")
+                .addOnSuccessListener { incomingReconnectRequest.postValue(null) }
+        } else {
+            val uid = auth.currentUser?.uid ?: return
+            firestore.collection("users").document(uid)
+                .collection("Session").document("active_session")
+                .collection("ReconnectRequests").document(requestId)
+                .update("status", "declined")
+                .addOnSuccessListener { incomingReconnectRequest.postValue(null) }
+        }
     }
 
     fun declineReconnect(viewerDeviceId: String? = null) {
@@ -1011,41 +1121,99 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
     fun createMotionSink(role: String = "camera"): MotionDetectionSink {
         return MotionDetectionSink(
             onMotionDetected = { percentage, frameData ->
-                if (motionEnabled) {
-                    webRTCManager.setMotionDetected(true, percentage)
-                    scheduleMotionReset()
+                // Basic check to skip processing if both are disabled
+                if (!motionEnabled && !personDetectionEnabled) return@MotionDetectionSink
 
-                    val devName = resolveDeviceName()
-                    alertManager.logMotion(percentage, role, devName)
+                val devName = resolveDeviceName()
 
-                    if (personDetectionEnabled && openCvDetector?.isAvailable() == true && frameData != null) {
-                        viewModelScope.launch(Dispatchers.IO) {
-                            try {
-                                val bitmap = MotionDetector.toBitmap(
-                                    frameData.yPlane, frameData.uPlane, frameData.vPlane,
-                                    frameData.width, frameData.height, frameData.strideY
-                                )
-                                if (bitmap != null) {
-                                    val result = openCvDetector?.detect(bitmap)
-                                    if (result != null) {
-                                        val boxes = result.personBoxes.map { BBox(it.x, it.y, it.width, it.height) }
-                                        val trackerResult = personTracker.update(boxes)
+                if (personDetectionEnabled && frameData != null) {
+                    viewModelScope.launch(Dispatchers.IO) {
+                        try {
+                            val bitmap = MotionDetector.toBitmap(
+                                frameData.yPlane, frameData.uPlane, frameData.vPlane,
+                                frameData.width, frameData.height, frameData.strideY
+                            )
+                            if (bitmap != null) {
+                                // 1. ML Kit Detection (People, Pets, Vehicles)
+                                val mlResult = mlKitDetector.detect(bitmap)
+                                var reportedAi = false
+                                
+                                // 2. Handle Pets and Vehicles
+                                if (mlResult.hasPet) {
+                                    alertManager.logPetDetected(role, devName)
+                                    reportedAi = true
+                                }
+                                if (mlResult.hasVehicle) {
+                                    alertManager.logVehicleDetected(role, devName)
+                                    reportedAi = true
+                                }
 
-                                        webRTCManager.setPersonDetected(trackerResult.hasPerson)
+                                // 3. Handle People Tracking
+                                val personBoxes = if (mlResult.personBoxes.isNotEmpty()) {
+                                    mlResult.personBoxes.map { BBox(it.left, it.top, it.width(), it.height()) }
+                                } else if (!mlResult.hasPet && !mlResult.hasVehicle && openCvDetector?.isAvailable() == true) {
+                                    // Fallback to OpenCV only if NO Pet or Vehicle was found by ML Kit
+                                    openCvDetector?.detect(bitmap)?.personBoxes?.map { 
+                                        BBox(it.x, it.y, it.width, it.height) 
+                                    } ?: emptyList()
+                                } else {
+                                    emptyList()
+                                }
 
-                                        for (newTrack in trackerResult.newTracks) {
-                                            alertManager.logPersonDetected(role, deviceName = devName, personId = newTrack.id)
+                                val trackerResult = personTracker.update(personBoxes)
+                                
+                                // Update WebRTC State for Person
+                                webRTCManager.setPersonDetected(trackerResult.hasPerson)
+
+                                val now = System.currentTimeMillis()
+                                if (trackerResult.hasPerson) {
+                                    reportedAi = true
+                                    // Handle New Person Notifications
+                                    for (track in trackerResult.newTracks) {
+                                        if (!track.personNotificationSent) {
+                                            alertManager.logPersonDetected(role, deviceName = devName, personId = track.id)
+                                            track.personNotificationSent = true
+                                            track.lastMotionNotificationTime = now
                                         }
                                     }
+                                    // Handle Motion for existing people
+                                    val movingPersonIds = mutableListOf<Int>()
+                                    for (track in trackerResult.matchedTracks) {
+                                        if (now - track.lastMotionNotificationTime > 20_000L) {
+                                            movingPersonIds.add(track.id)
+                                            track.lastMotionNotificationTime = now
+                                        }
+                                    }
+                                    if (movingPersonIds.isNotEmpty()) {
+                                        alertManager.logPeopleMotion(movingPersonIds, role, devName)
+                                    }
                                 }
-                            } catch (e: Exception) {
-                                Log.e(tag, "OpenCV detection error: ${e.message}")
+
+                                // UI update: if either AI reported or general motion is enabled
+                                if (reportedAi || motionEnabled) {
+                                    webRTCManager.setMotionDetected(true, percentage)
+                                    scheduleMotionReset()
+                                }
+                                
+                                // Notification logic for general motion:
+                                // Always log motion if enabled, even if AI also reported something (matching "Both" request)
+                                if (motionEnabled) {
+                                    alertManager.logMotion(percentage, role, devName)
+                                }
                             }
+                        } catch (e: Exception) {
+                            Log.e(tag, "Detection error: ${e.message}")
                         }
                     }
+                } else if (motionEnabled) {
+                    // AI disabled, but general motion is enabled
+                    webRTCManager.setMotionDetected(true, percentage)
+                    webRTCManager.setPersonDetected(false)
+                    scheduleMotionReset()
+                    alertManager.logMotion(percentage, role, devName)
                 }
             },
-            intervalMs = 200L
+            intervalMs = 800L
         )
     }
 
@@ -1061,15 +1229,50 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         motionResetRunnable?.let { handler.removeCallbacks(it) }
         val r = Runnable {
             webRTCManager.setMotionDetected(false, 0f)
+            webRTCManager.setPersonDetected(false)
         }
         motionResetRunnable = r
         handler.postDelayed(r, 3000L)
+    }
+
+    fun applyPreferences() {
+        motionEnabled = appPrefs.getBoolean("motion_detection", false)
+        personDetectionEnabled = appPrefs.getBoolean("ai_detection", false)
+        val sensitivity = appPrefs.getFloat("motion_sensitivity", 0.5f)
+        
+        val isAnyDetectionEnabled = motionEnabled || personDetectionEnabled
+        
+        localMotionSink?.setDetecting(isAnyDetectionEnabled)
+        localMotionSink?.setSensitivity(sensitivity)
+        
+        remoteMotionSink?.setDetecting(isAnyDetectionEnabled)
+        remoteMotionSink?.setSensitivity(sensitivity)
+
+        // Reset LiveData states if disabled
+        if (!isAnyDetectionEnabled) {
+            webRTCManager.setMotionDetected(false, 0f)
+            webRTCManager.setPersonDetected(false)
+            motionResetRunnable?.let { motionResetHandler?.removeCallbacks(it) }
+        } else if (!personDetectionEnabled) {
+            webRTCManager.setPersonDetected(false)
+        }
+
+        if (personDetectionEnabled && openCvDetector?.isAvailable() == false) {
+            openCvDetector?.initialize()
+        }
+        
+        Log.d(tag, "Preferences applied: motion=$motionEnabled, ai=$personDetectionEnabled, sensitivity=$sensitivity")
     }
 
     private fun setupLocalMotionDetection(role: String = "camera") {
         localMotionSink?.let { webRTCManager.removeLocalMotionSink() }
         val sink = createMotionSink(role)
         localMotionSink = sink
+        
+        // Apply current preferences to the new sink
+        sink.setDetecting(motionEnabled)
+        sink.setSensitivity(appPrefs.getFloat("motion_sensitivity", 0.5f))
+        
         webRTCManager.addLocalMotionSink(sink)
     }
 
@@ -1077,6 +1280,11 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         remoteMotionSink?.let { webRTCManager.removeAllRemoteMotionSinks() }
         val sink = createMotionSink(role)
         remoteMotionSink = sink
+        
+        // Apply current preferences to the new sink
+        sink.setDetecting(motionEnabled)
+        sink.setSensitivity(appPrefs.getFloat("motion_sensitivity", 0.5f))
+
         activePreviewSessionIds.value?.forEach { sid ->
             webRTCManager.addRemoteMotionSink(sid, sink)
         }
@@ -1411,6 +1619,8 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
     override fun onCleared() {
         super.onCleared()
         ipCamerasListener?.remove()
+        reconnectRequestsListener?.remove()
+        sentRequestStatusListener?.remove()
         stopAll()
         webRTCManager.release()
     }

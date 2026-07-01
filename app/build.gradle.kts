@@ -23,7 +23,15 @@ android {
         externalNativeBuild {
             cmake {
                 arguments("-DANDROID_SUPPORT_FLEXIBLE_PAGE_SIZES=ON")
+                arguments("-DANDROID_STL=c++_shared")
             }
+        }
+
+        ndk {
+            abiFilters.add("arm64-v8a")
+            abiFilters.add("x86_64")
+            abiFilters.add("armeabi-v7a")
+            abiFilters.add("x86")
         }
         manifestPlaceholders["izooto_app_id"] = "08318911261f48444af2588779ef790c614ce7d4"
     }
@@ -66,15 +74,11 @@ android {
     packaging {
         jniLibs {
             useLegacyPackaging = false
+            pickFirsts.add("**/libc++_shared.so")
         }
     }
 
 }
-
-// ── 16 KB page-size compatibility ──────────────────────────────────────────
-// All .so dependencies already ship with ELF p_align = 0x4000, no patching
-// needed. Verified: libopencv_java4.so, libc++_shared.so, etc.
-// ─────────────────────────────────────────────────────────────────────────────
 
 dependencies {
     implementation(libs.androidx.core.ktx)
@@ -118,7 +122,8 @@ dependencies {
     implementation(libs.socket.io)
     implementation(libs.webrtc)
 
-    implementation("com.quickbirdstudios:opencv:4.5.3.0")
+    // OpenCV 4.12.0+ is required for 16KB page alignment support
+    implementation("org.opencv:opencv:4.12.0")
 
     implementation(libs.androidx.room.runtime)
     implementation(libs.androidx.room.ktx)

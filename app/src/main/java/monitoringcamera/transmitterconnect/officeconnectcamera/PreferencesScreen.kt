@@ -24,7 +24,10 @@ import androidx.compose.ui.unit.sp
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun PreferencesScreen(navController: androidx.navigation.NavController) {
+fun PreferencesScreen(
+    navController: androidx.navigation.NavController,
+    viewModel: CameraViewModel = androidx.lifecycle.viewmodel.compose.viewModel()
+) {
     val context = LocalContext.current
     val prefs = remember { context.getSharedPreferences("app_prefs", Context.MODE_PRIVATE) }
 
@@ -36,6 +39,13 @@ fun PreferencesScreen(navController: androidx.navigation.NavController) {
     var sensitivity by remember { mutableStateOf(prefs.getFloat("motion_sensitivity", 0.5f)) }
     var aiDetection by remember { mutableStateOf(prefs.getBoolean("ai_detection", false)) }
     var alertSound by remember { mutableStateOf(prefs.getBoolean("alert_sound", true)) }
+
+    // Apply preferences when leaving the screen
+    DisposableEffect(Unit) {
+        onDispose {
+            viewModel.applyPreferences()
+        }
+    }
 
     Scaffold(
         topBar = {
@@ -107,8 +117,8 @@ fun PreferencesScreen(navController: androidx.navigation.NavController) {
             Text(
                 text = "SECURITY & ALERTS",
                 color = Color(0xFF9CA3AF),
-                fontSize = 12.sp,
-                fontWeight = FontWeight.Bold,
+                fontSize = 13.sp,
+                fontWeight = FontWeight.SemiBold,
                 letterSpacing = 1.sp
             )
             Spacer(modifier = Modifier.height(16.dp))
@@ -116,38 +126,49 @@ fun PreferencesScreen(navController: androidx.navigation.NavController) {
             // Motion Detection Card with Slider
             Card(
                 modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp),
-                shape = RoundedCornerShape(16.dp),
-                colors = CardDefaults.cardColors(containerColor = Color(0xFF161B22))
+                shape = RoundedCornerShape(12.dp),
+                colors = CardDefaults.cardColors(containerColor = Color(0xFF1B232D))
             ) {
-                Column(modifier = Modifier.padding(16.dp)) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Icon(Icons.Outlined.CenterFocusStrong, contentDescription = null, tint = Color.White, modifier = Modifier.size(24.dp))
-                        Spacer(modifier = Modifier.width(16.dp))
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text("Motion Detection", color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.Bold)
-                            Text("Enable AI-powered movement alerts.", color = Color(0xFF9CA3AF), fontSize = 12.sp)
-                        }
-                        Switch(
-                            checked = motionDetection,
-                            onCheckedChange = { 
-                                motionDetection = it
-                                prefs.edit().putBoolean("motion_detection", it).apply()
-                            },
-                            colors = SwitchDefaults.colors(
-                                checkedThumbColor = Color.White,
-                                checkedTrackColor = Color(0xFF77AEFF),
-                                uncheckedThumbColor = Color(0xFF9CA3AF),
-                                uncheckedTrackColor = Color(0xFF1B232D)
-                            )
-                        )
-                    }
+                Box(modifier = Modifier.height(IntrinsicSize.Min)) {
+                    // Left Accent Bar
+                    Box(
+                        modifier = Modifier
+                            .align(Alignment.CenterStart)
+                            .width(3.dp)
+                            .fillMaxHeight()
+                            .padding(vertical = 12.dp)
+                            .background(Color(0xFF77AEFF), RoundedCornerShape(2.dp))
+                    )
                     
-                    if (motionDetection) {
-                        Spacer(modifier = Modifier.height(24.dp))
-                        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                            Text("SENSITIVITY", color = Color(0xFF9CA3AF), fontSize = 10.sp, fontWeight = FontWeight.Bold)
-                            Text(if (sensitivity < 0.33f) "LOW" else if (sensitivity < 0.66f) "MEDIUM" else "HIGH", color = Color.White, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                    Column(modifier = Modifier.padding(16.dp)) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(Icons.Outlined.CenterFocusStrong, contentDescription = null, tint = Color.White, modifier = Modifier.size(24.dp))
+                            Spacer(modifier = Modifier.width(16.dp))
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text("Motion Detection", color = Color.White, fontSize = 16.sp, fontWeight = FontWeight.Bold)
+                                Text("Enable AI-powered movement alerts.", color = Color(0xFF9CA3AF), fontSize = 13.sp)
+                            }
+                            Switch(
+                                checked = motionDetection,
+                                onCheckedChange = { 
+                                    motionDetection = it
+                                    prefs.edit().putBoolean("motion_detection", it).apply()
+                                },
+                                colors = SwitchDefaults.colors(
+                                    checkedThumbColor = Color.White,
+                                    checkedTrackColor = Color(0xFF77AEFF),
+                                    uncheckedThumbColor = Color(0xFFE5E7EB),
+                                    uncheckedTrackColor = Color(0xFF374151)
+                                )
+                            )
                         }
+                        
+                        Spacer(modifier = Modifier.height(32.dp))
+                        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.Bottom) {
+                            Text("SENSITIVITY", color = Color(0xFF9CA3AF), fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                            Text(if (sensitivity < 0.33f) "LOW" else if (sensitivity < 0.66f) "MEDIUM" else "HIGH", color = Color(0xFF77AEFF), fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                        }
+                        Spacer(modifier = Modifier.height(8.dp))
                         Slider(
                             value = sensitivity,
                             onValueChange = { 
@@ -155,15 +176,16 @@ fun PreferencesScreen(navController: androidx.navigation.NavController) {
                                 prefs.edit().putFloat("motion_sensitivity", it).apply()
                             },
                             colors = SliderDefaults.colors(
-                                thumbColor = Color(0xFFBBC6E2),
-                                activeTrackColor = Color(0xFFBBC6E2).copy(alpha = 0.5f),
-                                inactiveTrackColor = Color(0xFF1B232D)
-                            )
+                                thumbColor = Color(0xFF77AEFF),
+                                activeTrackColor = Color(0xFF77AEFF),
+                                inactiveTrackColor = Color(0xFF374151)
+                            ),
+                            modifier = Modifier.height(24.dp)
                         )
                         Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                            Text("Low", color = Color(0xFF4B5563), fontSize = 10.sp)
-                            Text("Medium", color = Color(0xFF4B5563), fontSize = 10.sp)
-                            Text("High", color = Color(0xFF4B5563), fontSize = 10.sp)
+                            Text("Low", color = Color(0xFF6B7280), fontSize = 11.sp)
+                            Text("Medium", color = Color(0xFF6B7280), fontSize = 11.sp)
+                            Text("High", color = Color(0xFF6B7280), fontSize = 11.sp)
                         }
                     }
                 }
@@ -174,6 +196,7 @@ fun PreferencesScreen(navController: androidx.navigation.NavController) {
                 subtitle = "Identify and alert for people and pets specifically.",
                 icon = Icons.Default.Pets,
                 checked = aiDetection,
+                showAccent = true,
                 onCheckedChange = { 
                     aiDetection = it
                     prefs.edit().putBoolean("ai_detection", it).apply()
@@ -190,6 +213,22 @@ fun PreferencesScreen(navController: androidx.navigation.NavController) {
                     prefs.edit().putBoolean("alert_sound", it).apply()
                 }
             )
+
+            Spacer(modifier = Modifier.height(32.dp))
+
+            Button(
+                onClick = { 
+                    viewModel.applyPreferences()
+                    navController.popBackStack()
+                },
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(56.dp),
+                shape = RoundedCornerShape(12.dp),
+                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF77AEFF))
+            ) {
+                Text("Apply Settings", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 16.sp)
+            }
         }
     }
 }
@@ -200,35 +239,50 @@ fun PreferenceSwitchItem(
     subtitle: String,
     icon: androidx.compose.ui.graphics.vector.ImageVector? = null,
     checked: Boolean,
+    showAccent: Boolean = false,
     onCheckedChange: (Boolean) -> Unit
 ) {
     Card(
         modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp),
-        shape = RoundedCornerShape(16.dp),
-        colors = CardDefaults.cardColors(containerColor = Color(0xFF161B22))
+        shape = RoundedCornerShape(12.dp),
+        colors = CardDefaults.cardColors(containerColor = Color(0xFF1B232D))
     ) {
-        Row(
-            modifier = Modifier.padding(16.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            if (icon != null) {
-                Icon(icon, contentDescription = null, tint = Color.White, modifier = Modifier.size(24.dp))
-                Spacer(modifier = Modifier.width(16.dp))
-            }
-            Column(modifier = Modifier.weight(1f)) {
-                Text(text = title, color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.Bold)
-                Text(text = subtitle, color = Color(0xFF9CA3AF), fontSize = 12.sp)
-            }
-            Switch(
-                checked = checked,
-                onCheckedChange = onCheckedChange,
-                colors = SwitchDefaults.colors(
-                    checkedThumbColor = Color.White,
-                    checkedTrackColor = Color(0xFF77AEFF),
-                    uncheckedThumbColor = Color(0xFF9CA3AF),
-                    uncheckedTrackColor = Color(0xFF1B232D)
+        Box(modifier = Modifier.height(IntrinsicSize.Min)) {
+            if (showAccent) {
+                Box(
+                    modifier = Modifier
+                        .align(Alignment.CenterStart)
+                        .width(3.dp)
+                        .fillMaxHeight()
+                        .padding(vertical = 12.dp)
+                        .background(Color(0xFF77AEFF), RoundedCornerShape(2.dp))
                 )
-            )
+            }
+            
+            Row(
+                modifier = Modifier.padding(16.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                if (icon != null) {
+                    Icon(icon, contentDescription = null, tint = Color.White, modifier = Modifier.size(24.dp))
+                    Spacer(modifier = Modifier.width(16.dp))
+                }
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(text = title, color = Color.White, fontSize = 16.sp, fontWeight = FontWeight.Bold)
+                    Text(text = subtitle, color = Color(0xFF9CA3AF), fontSize = 13.sp)
+                }
+                Switch(
+                    checked = checked,
+                    onCheckedChange = onCheckedChange,
+                    colors = SwitchDefaults.colors(
+                        checkedThumbColor = Color.White,
+                        checkedTrackColor = Color(0xFF77AEFF),
+                        uncheckedThumbColor = Color(0xFFE5E7EB),
+                        uncheckedTrackColor = Color(0xFF374151)
+                    )
+                )
+            }
         }
     }
 }
+

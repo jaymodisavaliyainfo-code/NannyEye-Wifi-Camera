@@ -455,7 +455,7 @@ fun AppNavigation() {
             AccountSettingsScreen(navController = navController)
         }
         detailScreen("preferences") { _ ->
-            PreferencesScreen(navController = navController)
+            PreferencesScreen(navController = navController, viewModel = cameraViewModel)
         }
         detailScreen("monitor_wall") { _ ->
             MonitorWallScreen(navController = navController, cameraViewModel = cameraViewModel)

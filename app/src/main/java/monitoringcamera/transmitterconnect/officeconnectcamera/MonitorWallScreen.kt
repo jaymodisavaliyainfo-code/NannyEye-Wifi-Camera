@@ -44,7 +44,7 @@ fun MonitorWallScreen(
     viewModel: MonitorWallViewModel = viewModel(),
     cameraViewModel: CameraViewModel = viewModel()
 ) {
-    val savedDevices by viewModel.savedDevices.collectAsState()
+    val connectedMonitors by viewModel.connectedMonitors.collectAsState()
     val onlineMonitors by viewModel.onlineMonitors.observeAsState(emptyMap())
     
     val isBroadcasting by cameraViewModel.isBroadcasting.observeAsState(false)
@@ -52,7 +52,7 @@ fun MonitorWallScreen(
     val activePreviewSessions by cameraViewModel.activePreviewSessionIds.observeAsState(emptySet())
     val activePreviewDeviceNames by cameraViewModel.activePreviewDeviceNames.observeAsState(emptyMap())
 
-    val activeItems = remember(isBroadcasting, mySessionId, activePreviewSessions, onlineMonitors, savedDevices, activePreviewDeviceNames) {
+    val activeItems = remember(isBroadcasting, mySessionId, activePreviewSessions, onlineMonitors, connectedMonitors, activePreviewDeviceNames) {
         val list = mutableListOf<ActiveMonitorItem>()
         
         if (isBroadcasting && mySessionId.isNotEmpty()) {
@@ -64,7 +64,7 @@ fun MonitorWallScreen(
             list.add(ActiveMonitorItem.Remote(sid, name))
         }
         
-        savedDevices.filter { 
+        connectedMonitors.filter {
             it.sessionId !in activePreviewSessions && 
             it.sessionId != mySessionId &&
             onlineMonitors.containsKey(it.deviceId) 

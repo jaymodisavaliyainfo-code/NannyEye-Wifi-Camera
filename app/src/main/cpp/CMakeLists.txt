@@ -2,6 +2,9 @@ cmake_minimum_required(VERSION 3.22.1)
 
 project("native-lib")
 
+# 16 KB page-size compatibility
+set(CMAKE_SHARED_LINKER_FLAGS "${CMAKE_SHARED_LINKER_FLAGS} -Wl,-z,max-page-size=16384")
+
 add_library( # Sets the name → must match System.loadLibrary("...")
         native-lib
         SHARED

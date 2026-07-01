@@ -455,6 +455,15 @@ fun MainScreen(
     var showQrDialog by remember { mutableStateOf(false) }
     val isConnected by viewModel.getSessionConnectionState(viewModel.sessionId.observeAsState("").value).observeAsState(false)
     val reconnectRequest by viewModel.incomingReconnectRequest.observeAsState()
+    val requestDeclinedMessage by viewModel.requestDeclinedMessage.observeAsState()
+
+    // Handle Request Declined Message
+    LaunchedEffect(requestDeclinedMessage) {
+        requestDeclinedMessage?.let { msg ->
+            android.widget.Toast.makeText(context, msg, android.widget.Toast.LENGTH_LONG).show()
+            viewModel.requestDeclinedMessage.postValue(null)
+        }
+    }
 
     // Handle Reconnect Request dialog
     reconnectRequest?.let { request ->
@@ -1587,7 +1596,12 @@ fun DashboardContent(
     }
 
     if (showQrDialog && qrBitmap != null) {
-        Dialog(onDismissRequest = { showQrDialog = false }) {
+        Dialog(onDismissRequest = {
+            if (!isConnected) {
+                viewModel.stopStreaming()
+            }
+            showQrDialog = false
+        }) {
             Card(
                 shape = RoundedCornerShape(32.dp),
                 colors = CardDefaults.cardColors(containerColor = Color(0xFF161B22)),
@@ -1698,7 +1712,9 @@ fun DashboardContent(
                         horizontalArrangement = Arrangement.spacedBy(12.dp)
                     ) {
                         Button(
-                            onClick = { showQrDialog = false },
+                            onClick = {
+                                showQrDialog = false
+                            },
                             modifier = Modifier
                                 .weight(1f)
                                 .height(56.dp),
@@ -4934,37 +4950,43 @@ fun formatActivityTime(timestamp: Long): String {
 
 @Composable
 fun getActivityIcon(type: String): ImageVector {
-    return when (type) {
-        "camera_start" -> Icons.Default.Videocam
-        "camera_stop" -> Icons.Default.VideocamOff
-        "monitor_connect" -> Icons.Default.Podcasts
-        "monitor_disconnect" -> Icons.Default.Close
-        "reconnecting" -> Icons.Default.Refresh
-        "connection_lost" -> Icons.Outlined.ErrorOutline
-        "live_start" -> Icons.Default.PlayCircle
-        "live_end" -> Icons.Default.Adjust
-        "audio_mute" -> Icons.Default.MicOff
-        "audio_unmute" -> Icons.Default.Mic
-        "viewer_connect" -> Icons.Default.Person
-        "viewer_disconnect" -> Icons.Default.Person
-        "screenshot" -> Icons.Default.Visibility
-        "video_record" -> Icons.Default.History
+    return when {
+        type.startsWith("person") || type.startsWith("face") -> Icons.Default.Person
+        type.startsWith("pet") -> Icons.Default.Pets
+        type.startsWith("vehicle") -> Icons.Default.DirectionsCar
+        type == "camera_start" -> Icons.Default.Videocam
+        type == "camera_stop" -> Icons.Default.VideocamOff
+        type == "monitor_connect" -> Icons.Default.Podcasts
+        type == "monitor_disconnect" -> Icons.Default.Close
+        type == "reconnecting" -> Icons.Default.Refresh
+        type == "connection_lost" -> Icons.Outlined.ErrorOutline
+        type == "live_start" -> Icons.Default.PlayCircle
+        type == "live_end" -> Icons.Default.Adjust
+        type == "audio_mute" -> Icons.Default.MicOff
+        type == "audio_unmute" -> Icons.Default.Mic
+        type == "viewer_connect" -> Icons.Default.Person
+        type == "viewer_disconnect" -> Icons.Default.Person
+        type == "screenshot" -> Icons.Default.Visibility
+        type == "video_record" -> Icons.Default.History
+        type == "motion" -> Icons.AutoMirrored.Filled.DirectionsRun
         else -> Icons.Default.CheckCircle
     }
 }
 
 fun getActivityIconColor(type: String): Color {
-    return when (type) {
-        "camera_start", "monitor_connect", "live_start", "audio_unmute", "viewer_connect" -> Color(
+    return when {
+        type.startsWith("motion") -> Color.Yellow.copy(alpha = 0.8f)
+        type.startsWith("person") || type.startsWith("face") -> Color.Red.copy(alpha = 0.8f)
+        type.startsWith("pet") -> Color(0xFF77AEFF)
+        type.startsWith("vehicle") -> Color(0xFFFF8A65)
+        type == "camera_start" || type == "monitor_connect" || type == "live_start" || type == "audio_unmute" || type == "viewer_connect" -> Color(
             0xFF77AEFF
         )
-
-        "camera_stop", "monitor_disconnect", "connection_lost", "live_end", "audio_mute", "viewer_disconnect" -> Color(
+        type == "camera_stop" || type == "monitor_disconnect" || type == "connection_lost" || type == "live_end" || type == "audio_mute" || type == "viewer_disconnect" -> Color(
             0xFFFF8A80
         )
-
-        "reconnecting" -> Color(0xFFFFD54F)
-        "screenshot", "video_record" -> Color(0xFFBBC6E2)
+        type == "reconnecting" -> Color(0xFFFFD54F)
+        type == "screenshot" || type == "video_record" -> Color(0xFFBBC6E2)
         else -> Color.White
     }
 }
@@ -5230,6 +5252,18 @@ fun CameraScannerPreview(onScanSuccess: (String) -> Unit, onCameraReady: (Camera
     val lifecycleOwner = LocalLifecycleOwner.current
     val cameraProviderFuture = remember { ProcessCameraProvider.getInstance(context) }
     var hasScanned by remember { mutableStateOf(false) }
+
+    DisposableEffect(Unit) {
+        onDispose {
+            if (cameraProviderFuture.isDone) {
+                try {
+                    cameraProviderFuture.get().unbindAll()
+                } catch (e: Exception) {
+                    // Ignore
+                }
+            }
+        }
+    }
 
     AndroidView(
         factory = { ctx ->
